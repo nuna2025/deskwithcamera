@@ -18,6 +18,22 @@ def draw_x(surf, center, size, color=None, width=None):
     pygame.draw.line(surf, color, (cx - r, cy + r), (cx + r, cy - r), width)
 
 
+def draw_plus(surf, center, size, color=None, width=None):
+    cx, cy = center
+    r = size // 2
+    color = color or config.LINE_COLOR
+    width = width or config.LINE_WIDTH
+    pygame.draw.line(surf, color, (cx - r, cy), (cx + r, cy), width)
+    pygame.draw.line(surf, color, (cx, cy - r), (cx, cy + r), width)
+
+
+def draw_minus(surf, center, size, color=None, width=None):
+    cx, cy = center
+    r = size // 2
+    pygame.draw.line(surf, color or config.LINE_COLOR, (cx - r, cy), (cx + r, cy),
+                     width or config.LINE_WIDTH)
+
+
 def draw_vline(surf, x, color=None, width=None):
     """Vertical line over the full height of the content area (e.g. center line)."""
     w = width or config.LINE_WIDTH

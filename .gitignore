@@ -1,0 +1,35 @@
+# =============================================================================
+# .gitignore for the BachelorArbeit repository
+# (README, deskwithcamera/ and everything else live below this folder)
+# =============================================================================
+
+# --- Python (applies to the whole repository) --------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# --- Editor / OS (applies to the whole repository) ---------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+.env
+
+# --- deskwithcamera: local setup that differs per computer / room ------------
+# Camera + projector position from the calibration module (home and school differ)
+deskwithcamera/calibration.json
+
+# Snapshots written by scripts/list_devices.py (wherever it is run from)
+camera_*.jpg
+
+# --- deskwithcamera: project data (can get large) ----------------------------
+# Trained models, datasets, results. The folders stay thanks to .gitkeep.
+deskwithcamera/projects/*/data/*
+!deskwithcamera/projects/*/data/.gitkeep
+
+# --- deskwithcamera: helper script that is not shared ------------------------
+deskwithcamera/scripts/new_project.py
