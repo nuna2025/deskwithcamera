@@ -23,3 +23,6 @@ STABLE_TOL_PX = 6                    # ... moving less than this (in board pixel
 # --- Saved card images ----------------------------------------------------------
 CROP_INNER = 0.92                    # keep the inner 92% of a card (no card edge / table)
 CARD_SIZE = 256                      # saved card images are CARD_SIZE x CARD_SIZE (aspect ratio kept, white padding)
+
+# --- Classification model -------------------------------------------------------
+MODEL_ID = 1                         # 1 = HSV + Linear SVM, 2 = MobileNetV2 + LogReg, 3 = HOG + Linear SVM

@@ -70,3 +70,24 @@ def save_session(root, frame, board, reference, overlay, cards, calib, labels):
             "cards": {lab: sum(1 for r in rows if r["label"] == lab) for lab in labels.values()}}
     (folder / "session.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     return folder, rows
+
+
+
+def load_cards(data_dir=None):
+    """Load every saved card image of every session.
+
+    Returns (images, labels, names): BGR arrays, "poisonous"/"safe", and "<session>/<label>/<file>".
+    Sessions are read in alphabetical (= chronological) order.
+    """
+    root = Path(data_dir) if data_dir else Path(cfg.DATA_DIR)
+    sessions = root / "sessions" if (root / "sessions").is_dir() else root
+    images, labels, names = [], [], []
+    for sdir in sorted(p for p in sessions.iterdir() if p.is_dir()) if sessions.is_dir() else []:
+        for label in ("safe", "poisonous"):
+            for f in sorted((sdir / "cards" / label).glob("*.png")):
+                img = cv2.imread(str(f))
+                if img is not None:
+                    images.append(img)
+                    labels.append(label)
+                    names.append(f"{sdir.name}/{label}/{f.name}")
+    return images, labels, names
