@@ -12,12 +12,14 @@ the frame.
       └──────────────────────────────────────────────────┘
 """
 from dataclasses import dataclass
+from pathlib import Path
 
 import pygame
 
 import config
 
-FONT_NAMES = "malgungothic,applegothic,notosanscjkkr,nanumgothic,arial"
+FALLBACK_FONTS = "malgungothic,applegothic,notosanscjkkr,nanumgothic,arial"   # used if a font file is missing
+FONT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @dataclass
@@ -48,7 +50,7 @@ def compute_layout(width, height):
     frame = pygame.Rect(round((width - fw) / 2), round(top + header_h),
                         round(fw), round(fh))
     lw = config.LINE_WIDTH
-    inner = frame.inflate(-2 * lw, -2 * lw)
+    inner = frame.inflate(-2 * lw, -2 * lw)             # (the thin outer line is drawn OUTSIDE the frame rect)
     return Layout(frame, inner, round(top), font_size)
 
 
@@ -56,31 +58,44 @@ class Board:
     def __init__(self):
         self._fonts = {}
 
-    def font(self, size):
+    def font(self, size, weight=None):
+        """Hahmlet font in the given pixel size. weight: "Medium", "Bold", "ExtraBold" ... (default config.TEXT_WEIGHT)."""
         size = max(8, int(size))
-        if size not in self._fonts:
-            self._fonts[size] = pygame.font.SysFont(FONT_NAMES, size)
-        return self._fonts[size]
+        weight = weight or config.TEXT_WEIGHT
+        key = (size, weight)
+        if key not in self._fonts:
+            path = FONT_ROOT / config.FONT_DIR / f"{config.FONT_FAMILY}-{weight}.ttf"
+            if path.exists():
+                self._fonts[key] = pygame.font.Font(str(path), size)
+            else:
+                print(f"[board] font file not found: {path} (using a system font instead)")
+                self._fonts[key] = pygame.font.SysFont(FALLBACK_FONTS, size)
+        return self._fonts[key]
 
     def draw(self, screen, title, cam_on):
         """Draw background, header and frame; return the content Surface for the module."""
         lay = compute_layout(*screen.get_size())
         screen.fill(config.BG_COLOR)
-        font = self.font(lay.font_size)
+        font = self.font(lay.font_size, config.HEADER_WEIGHT)
 
         # Top left: Cam: ON / OFF (live)
-        label = font.render("Cam: ", True, config.TEXT_COLOR)
-        state = font.render("ON" if cam_on else "OFF", True,
-                            config.CAM_ON_COLOR if cam_on else config.CAM_OFF_COLOR)
-        x = lay.frame.left
-        screen.blit(label, (x, lay.header_y))
-        screen.blit(state, (x + label.get_width(), lay.header_y))
+        if config.SHOW_CAM_STATUS:
+            label = font.render("Cam: ", True, config.CAM_LABEL_COLOR)
+            state = font.render("ON" if cam_on else "OFF", True,
+                                config.CAM_ON_COLOR if cam_on else config.CAM_OFF_COLOR)
+            x = lay.frame.left
+            screen.blit(label, (x, lay.header_y))
+            screen.blit(state, (x + label.get_width(), lay.header_y))
 
         # Top right: module title
         t = font.render(title, True, config.TEXT_COLOR)
         screen.blit(t, (lay.frame.right - t.get_width(), lay.header_y))
 
-        # Frame line
-        pygame.draw.rect(screen, config.LINE_COLOR, lay.frame, config.LINE_WIDTH)
+        # Frame: thin outer line (blue) around a thicker red line, both with slightly rounded corners
+        r, ow = config.CORNER_RADIUS, config.OUTER_LINE_WIDTH
+        if ow > 0:
+            pygame.draw.rect(screen, config.FRAME_OUTER_COLOR, lay.frame.inflate(2 * ow, 2 * ow), ow,
+                             border_radius=r + ow)
+        pygame.draw.rect(screen, config.FRAME_COLOR, lay.frame, config.LINE_WIDTH, border_radius=r)
 
         return screen.subsurface(lay.inner)

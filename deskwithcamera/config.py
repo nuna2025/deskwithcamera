@@ -27,16 +27,30 @@ WINDOW_SIZE = (1280, 720)       # window size for the "window" profile
 
 # --- Base frame --------------------------------------------------------------
 ASPECT = (16, 9)                # frame aspect ratio (like a laptop screen)
-LINE_WIDTH = 6                  # frame line thickness (pixels)
+LINE_WIDTH = 8                  # frame line thickness (pixels)
+OUTER_LINE_WIDTH = 5            # extra blue line wrapped around the OUTSIDE of the frame (pixels)
+CORNER_RADIUS = 50              # rounded frame corners (pixels, 0 = sharp)
 MARGIN = 0.03                   # margin to the screen edge (fraction)
 HEADER_FONT_RATIO = 0.045       # header text size (relative to screen height)
 HEADER_GAP = 10                 # gap between header and frame (pixels)
+SHOW_CAM_STATUS = True          # show "Cam: ON/OFF" at the top left (False = hide it)
 
-# --- Colors ------------------------------------------------------------------
-BG_COLOR = (0, 0, 0)
-LINE_COLOR = (255, 255, 255)
-TEXT_COLOR = (255, 255, 255)
-CAM_ON_COLOR = (90, 255, 130)
+# --- Fonts -------------------------------------------------------------------
+# Files live in assets/fonts/Hahmlet-<Weight>.ttf
+# Weights: Thin, ExtraLight, Light, Regular, Medium, SemiBold, Bold, ExtraBold, Black
+FONT_DIR = "assets/fonts"
+FONT_FAMILY = "Hahmlet"
+TEXT_WEIGHT = "Medium"          # default weight of all projected text
+HEADER_WEIGHT = "ExtraBold"     # "Cam: ON/OFF" and the module title (try "Bold" as well)
+
+# --- Colors (RGB) ------------------------------------------------------------
+BG_COLOR = (0x07, 0x19, 0x34)           # #071934  background (instead of black)
+FRAME_COLOR = (0xFF, 0xF5, 0xA0)        # #fff5a0  frame line
+FRAME_OUTER_COLOR = (0x00, 0x00, 0xFF)  # #0000ff  thin line around the outside of the frame
+LINE_COLOR = (0xFF, 0xF5, 0xA0)         # #fff5a0  all other lines/shapes (center line, + / - ...)
+TEXT_COLOR = (0xFF, 0xF5, 0xA0)         # #fff5a0  all text
+CAM_LABEL_COLOR = (0xFF, 0x00, 0x00)    # #ff0000  the word "Cam:"
+CAM_ON_COLOR = (0xCD, 0xDC, 0x39)       # #CDDC39  "ON", card counts, "Calibrated OK"
 CAM_OFF_COLOR = (255, 90, 90)
 
 # --- Camera ------------------------------------------------------------------
