@@ -123,13 +123,19 @@ class StabilityTracker:
 
 # --- cutting out single cards ----------------------------------------------------------
 def crop_raw(board, card):
-    """Perspective-corrected crop of the whole card, long side horizontal."""
+    """Perspective-corrected crop of the whole card.
+
+    The card keeps the orientation it has on the table (its top edge = the edge that is closest to
+    horizontal), so an upright mushroom stays upright. Only if cfg.LONG_SIDE_HORIZONTAL is True the
+    crop is turned so that the long side is horizontal (old behaviour; for a square card this was a
+    coin flip, which is why square cards came out turned by 90 degrees at random).
+    """
     tl, tr, br, bl = card.box
     wd, hd = float(np.linalg.norm(tr - tl)), float(np.linalg.norm(bl - tl))
     dst = np.array([[0, 0], [wd, 0], [wd, hd], [0, hd]], dtype=np.float32)
     M = cv2.getPerspectiveTransform(card.box.astype(np.float32), dst)
     raw = cv2.warpPerspective(board, M, (max(int(round(wd)), 1), max(int(round(hd)), 1)))
-    if hd > wd:
+    if cfg.LONG_SIDE_HORIZONTAL and hd > wd:
         raw = cv2.rotate(raw, cv2.ROTATE_90_CLOCKWISE)
     return raw
 
