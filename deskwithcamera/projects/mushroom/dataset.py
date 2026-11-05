@@ -72,22 +72,38 @@ def save_session(root, frame, board, reference, overlay, cards, calib, labels):
     return folder, rows
 
 
-
-def load_cards(data_dir=None):
-    """Load every saved card image of every session.
-
-    Returns (images, labels, names): BGR arrays, "poisonous"/"safe", and "<session>/<label>/<file>".
-    Sessions are read in alphabetical (= chronological) order.
-    """
+def _sessions_dir(data_dir=None):
     root = Path(data_dir) if data_dir else Path(cfg.DATA_DIR)
-    sessions = root / "sessions" if (root / "sessions").is_dir() else root
+    return root / "sessions" if (root / "sessions").is_dir() else root
+
+
+def list_sessions(data_dir=None):
+    """[(session_name, n_safe, n_poisonous)] in chronological order."""
+    sdir = _sessions_dir(data_dir)
+    out = []
+    for d in sorted(p for p in sdir.iterdir() if p.is_dir()) if sdir.is_dir() else []:
+        n = {lab: len(list((d / "cards" / lab).glob("*.png"))) for lab in ("safe", "poisonous")}
+        out.append((d.name, n["safe"], n["poisonous"]))
+    return out
+
+
+def load_cards(data_dir=None, sessions=None):
+    """Load saved card images.
+
+    sessions: None = every session, or a list of session folder names (a name prefix is enough,
+              e.g. "20261104_21"). Returns (images, labels, names): BGR arrays, "poisonous"/"safe",
+              and "<session>/<label>/<file>".
+    """
+    sdir = _sessions_dir(data_dir)
     images, labels, names = [], [], []
-    for sdir in sorted(p for p in sessions.iterdir() if p.is_dir()) if sessions.is_dir() else []:
+    for d in sorted(p for p in sdir.iterdir() if p.is_dir()) if sdir.is_dir() else []:
+        if sessions is not None and not any(d.name.startswith(x) for x in sessions):
+            continue
         for label in ("safe", "poisonous"):
-            for f in sorted((sdir / "cards" / label).glob("*.png")):
+            for f in sorted((d / "cards" / label).glob("*.png")):
                 img = cv2.imread(str(f))
                 if img is not None:
                     images.append(img)
                     labels.append(label)
-                    names.append(f"{sdir.name}/{label}/{f.name}")
+                    names.append(f"{d.name}/{label}/{f.name}")
     return images, labels, names
