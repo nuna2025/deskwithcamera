@@ -11,9 +11,18 @@ os.environ.setdefault("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0")
 import pygame
 
 import config
-from core.board import Board
+from core import theme as themes
+from core.board import Board, compute_layout
+from core.buttons import ButtonPanel, ButtonSpec
 from core.calibration import Calibration
 from core.camera import Camera
+
+try:
+    from core import vision
+except ImportError:                       # OpenCV missing: no hand detection, the mouse still works
+    vision = None
+
+CAM_OFF_TEXT = "Cam OFF: the camera is not working, so nothing can be recognized yet"
 
 WIN_MODES = {"extend": "/extend", "external": "/external",
              "clone": "/clone", "internal": "/internal"}
@@ -46,10 +55,13 @@ def keep_on_top():
 
 
 class App:
-    def __init__(self, modules, profile=None, project_title="", start_index=0):
+    def __init__(self, modules, profile=None, project_title="", start_index=0, home_index=None):
         self.modules = modules
         self.index = start_index
+        self.home_index = home_index          # index of the Home module (None = no Home, no HOME button)
         self.project_title = project_title
+        self.panel = ButtonPanel()            # hand-on-button buttons of the module on screen
+        self.running = False
         self.profile_name = profile or config.DISPLAY_PROFILE
         self.profile = config.PROFILES[self.profile_name]
         self.board = Board()
@@ -61,10 +73,56 @@ class App:
     def module(self):
         return self.modules[self.index]
 
+    # --- Actions for buttons ---------------------------------------------------
+    def go_home(self):
+        if self.home_index is not None:
+            self.switch(self.home_index)
+
+    def quit(self):
+        self.running = False
+
+    def _enter(self):
+        """Start the current module and set up its buttons (HOME is added automatically)."""
+        mod = self.module
+        mod.on_enter(self)
+        specs = []
+        if mod.show_buttons:
+            if self.home_index is not None and self.index != self.home_index and mod.show_home:
+                specs.append(ButtonSpec("home", "HOME", lambda app: app.go_home(), "left"))
+            specs += list(mod.buttons(self))
+        self.panel.set_buttons(specs)
+
     # --- Drawing (also used by tests) ----------------------------------------
     def render(self, surface):
-        content = self.board.draw(surface, self.module.title, self.camera.is_on)
-        self.module.draw(content, self)
+        mod = self.module
+        themes.apply(mod.theme or themes.DARK)
+        msg = self.panel.message() if mod.show_buttons else None
+        hint, mode = msg if msg else mod.hint(self)
+        if config.CAMERA_ENABLED and not self.camera.is_on:          # replaces the old "Cam: OFF" at the top left
+            hint, mode = CAM_OFF_TEXT, "blink"
+        content = self.board.draw(surface, mod.area or self.project_title, mod.title, hint, mode)
+        mod.draw(content, self)
+        if mod.show_buttons:
+            self.panel.draw(content, self)
+
+    def _board_gray(self):
+        """Small gray top-down view of the content area for the button detection (None if not possible)."""
+        if vision is None or not self.calib.ok or not self.camera.is_on:
+            return None
+        frame = self.camera.latest()
+        return None if frame is None else vision.board_gray(frame, self.calib.H)
+
+    def update_buttons(self, dt):
+        mod = self.module
+        if not mod.show_buttons:
+            return
+        lay = compute_layout(*self.screen.get_size())
+        mouse = None
+        if pygame.mouse.get_focused():
+            mx, my = pygame.mouse.get_pos()
+            if lay.inner.collidepoint(mx, my):
+                mouse = (mx - lay.inner.x, my - lay.inner.y)
+        self.panel.update(dt, self, lay.inner.size, self._board_gray(), mouse)
 
     # --- Opening the display -------------------------------------------------
     def open_display(self):
@@ -95,24 +153,24 @@ class App:
             return
         self.module.on_exit(self)
         self.index = new_index
-        self.module.on_enter(self)
+        self._enter()
 
     # --- Main loop -----------------------------------------------------------
     def run(self):
         self.open_display()
         if config.CAMERA_ENABLED:
             self.camera.start()
-        self.module.on_enter(self)
+        self._enter()
         clock = pygame.time.Clock()
-        running = True
-        while running:
+        self.running = True
+        while self.running:
             dt = clock.tick(30) / 1000
             for e in pygame.event.get():
                 if e.type == pygame.QUIT:
-                    running = False
+                    self.running = False
                 elif e.type == pygame.KEYDOWN:
                     if e.key == pygame.K_ESCAPE:
-                        running = False
+                        self.running = False
                     elif e.key in (pygame.K_RIGHT, pygame.K_TAB):
                         self.switch(self.index + 1)
                     elif e.key == pygame.K_LEFT:
@@ -125,6 +183,7 @@ class App:
                             self.switch(n)
                 self.module.handle_event(e, self)
             self.module.update(dt, self)
+            self.update_buttons(dt)
             self.render(self.screen)
             pygame.display.flip()
         self.module.on_exit(self)

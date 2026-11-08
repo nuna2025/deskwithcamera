@@ -1,5 +1,6 @@
 """Start:  python main.py [--project NAME] [--profile window|projector|laptop2|second_only]
           python main.py --calibrate     (start on the calibration screen and calibrate again)
+          python main.py --home          (Home screen with all modules; hold a hand on a tile)
           python main.py --list          (show all projects)
 
 Keys: Left/Right/Tab = switch module, 1-9 = select module,
@@ -10,6 +11,7 @@ import sys
 
 import config
 from core.app import App
+from core.home import HomeModule
 from projects import discover
 from tools import tool_modules
 
@@ -37,6 +39,8 @@ def main():
     p.add_argument("--camera", type=int, help="camera index (overrides config.CAMERA_INDEX)")
     p.add_argument("--calibrate", action="store_true",
                    help="ignore the saved calibration and start on the calibration screen")
+    p.add_argument("--home", action="store_true",
+                   help="start with the Home screen: all modules of all projects, chosen with a hand on a tile")
     p.add_argument("--list", action="store_true", help="list available projects and exit")
     args = p.parse_args()
 
@@ -49,11 +53,18 @@ def main():
     if args.camera is not None:
         config.CAMERA_INDEX = args.camera
 
-    info = projects[args.project]
-    tools = tool_modules() if info.include_tools else []
-    modules = tools + info.modules()          # tools first (keys 1-3), project modules after
-
-    app = App(modules, profile=args.profile, project_title=info.title)
+    if args.home:
+        tools = tool_modules()
+        home = HomeModule()
+        project_modules = [m for pr in projects.values() for m in pr.modules()]
+        modules = tools + [home] + project_modules      # tools (keys 1-3), Home, then every module
+        home.set_entries([(m.menu_label, m.menu_caption, i) for i, m in enumerate(modules) if m.menu_label])
+        app = App(modules, profile=args.profile, project_title="Table games", home_index=len(tools))
+    else:
+        info = projects[args.project]
+        tools = tool_modules() if info.include_tools else []
+        modules = tools + info.modules()          # tools first (keys 1-3), project modules after
+        app = App(modules, profile=args.profile, project_title=info.title)
     app.index = choose_start(app, modules, tools, args.calibrate)
     if app.calib.ok:
         print(f"[calibration] using saved calibration (rms {app.calib.rms:.1f} px). "

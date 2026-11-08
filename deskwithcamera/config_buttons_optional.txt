@@ -1,0 +1,35 @@
+# OPTIONAL: nothing here is required. Every value has a default in core/opts.py.
+# Add a line to your config.py only if you want to change it.
+
+# --- header ---
+HINT_SCALE = 0.85              # size of the centered explanation (1.0 = as big as the right-hand screen name)
+BLINK_PERIOD = 1.0             # seconds per blink cycle (attention messages)
+BLINK_ON = 0.65                # fraction of the cycle the text is visible
+
+# --- layout ---
+HUD_FRAC = 0.19                # top part: button row + counters. Cards go BELOW this line
+
+# --- button shapes (fractions of the content area) ---
+BUTTON_W = 0.11                # rectangular button: width  (fraction of the content width)
+BUTTON_H = 0.065               # rectangular button: height (fraction of the content height)
+BUTTON_GAP = 0.02              # gap between RESET and SAVE
+CIRCLE_D = 0.14                # round HOME / EXIT button: diameter (fraction of the content height)
+CIRCLE_RING = 6                # round button: line thickness in pixels
+BUTTON_WEIGHT = "Black"        # font weight of button texts and the captions below them
+TILE_W = 0.22                  # Home tile: width
+TILE_H = 0.15                  # Home tile: height
+
+# --- hand-on-button buttons ---
+BUTTON_HOLD = 2.0              # seconds a hand must stay on a normal button
+BUTTON_HOLD_DANGER = 3.5       # ... on EXIT
+BUTTON_SETTLE = 1.5            # after a screen change: "Hands away" time
+BUTTON_BASELINE_SECONDS = 0.5  # then the empty buttons are photographed for this long
+BUTTON_RELEASE = 0.6           # hand must be away this long before a button works again
+BUTTON_GAP_TOLERANCE = 0.3     # hand may flicker away this long without restarting the hold
+BUTTON_DIFF_THR = 40           # gray difference (0..255) that counts as "changed"   <- tune at the table
+BUTTON_PRESENT_FRAC = 0.35     # share of the button zone that must change = hand      <- tune at the table
+BUTTON_ZONE_SHRINK = 0.2       # detection zone = button shrunk by this much on every side
+BUTTON_MOUSE = True            # mouse pointer counts as a hand (testing on the laptop)
+
+# No longer used (you may delete them from config.py): SHOW_CAM_STATUS, CAM_STATUS_SCALE.
+# "Cam OFF" is now a blinking message in the middle of the header.

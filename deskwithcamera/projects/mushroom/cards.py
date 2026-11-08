@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from core.opts import opt
 from projects.mushroom import settings as cfg
 
 
@@ -49,7 +50,7 @@ def detect_cards(board, reference, board_size=None, return_mask=False):
     """Find all cards on the board. Returns a list of Card (flagged ones included).
     With return_mask=True returns (cards, mask) - the mask is what the detector 'sees' (for debugging)."""
     bw, bh = board_size or (board.shape[1], board.shape[0])
-    hud_px = int(cfg.HUD_FRAC * bh)
+    hud_px = int(opt("HUD_FRAC") * bh)                        # top part = buttons + counters
 
     diff = cv2.absdiff(board, reference).max(axis=2)
     diff = cv2.GaussianBlur(diff, (5, 5), 0)

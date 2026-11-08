@@ -2,22 +2,27 @@
 
 Workflow
     1. Calibrate first (key 2). The camera must see the whole frame.
-    2. Empty table (no cards)  ->  press B   (takes the empty-table reference picture)
+    2. Clear the table: the empty-table reference picture is taken by itself a few seconds after the
+       module starts (and again after RESET). Key: B = take it now.
     3. Put the cards BELOW the gray line, completely inside their half (+ right, - left), not touching
-    4. Wait until the status says "Ready"  ->  press S   (saves the session)
+    4. Wait until the header says "Ready"  ->  hold a hand on SAVE  (or press S)
 
+Buttons (hold a hand on them): HOME (if there is a Home screen), RESET, SAVE
 Keys work in the projection window AND in the camera preview window on the laptop:
     B = empty-table reference     S = save session     D = show/hide the detector's mask (debugging)
     (ESC / C / Tab are handled by the app)
 """
+import math
 import time
 
 import numpy as np
 import pygame
 
 import config
+from core.buttons import ButtonSpec, row_center
 from core.module import Module
-from core.shapes import draw_minus, draw_plus, draw_text, draw_vline
+from core.opts import opt
+from core.shapes import draw_minus, draw_plus, draw_vline
 from projects.mushroom import settings as cfg
 from projects.mushroom.cards import StabilityTracker, detect_cards, rectify
 from projects.mushroom.dataset import save_session
@@ -33,8 +38,15 @@ COLORS = {"+": (60, 120, 255), "-": (255, 170, 60)}          # BGR: + orange-red
 BAD = (0, 0, 255)
 
 
+REF_DELAY = 3.0              # seconds after the module starts until the empty-table picture is taken
+RESET_DELAY = 2.5            # ... after RESET
+
+
 class CardCapture(Module):
     title = "Card capture"
+    area = "Classification"
+    menu_label = "Classification"
+    menu_caption = "Mushroom cards"
 
     def __init__(self):
         self.reset()
@@ -46,6 +58,7 @@ class CardCapture(Module):
         self._ref_H = None
         self._ref_frames = []
         self._ref_pending = 0
+        self._ref_countdown = 0.0        # > 0: seconds until the reference is taken (hands away!)
         self.cards = []
         self.tracker = StabilityTracker()
         self.board = None
@@ -58,6 +71,7 @@ class CardCapture(Module):
     # --- lifecycle --------------------------------------------------------
     def on_enter(self, app):
         self.reset()                 # exposure / lighting may have changed: take a new reference
+        self._ref_countdown = REF_DELAY
 
     def on_exit(self, app):
         if cv2 is not None and self._preview_on:
@@ -77,6 +91,7 @@ class CardCapture(Module):
 
     def key(self, ch, app):
         if ch == "b":
+            self._ref_countdown = 0.0
             self._ref_frames, self._ref_pending = [], cfg.REFERENCE_FRAMES
             self.cards = []
             self.tracker.reset()
@@ -85,12 +100,33 @@ class CardCapture(Module):
         elif ch == "d":
             self.show_mask = not self.show_mask
 
+    # --- buttons -----------------------------------------------------------
+    def buttons(self, app):
+        return [
+            ButtonSpec("save", "SAVE", lambda app: self.save(app), "right", enabled=lambda app: self.can_save()),
+            ButtonSpec("reset", "RESET", lambda app: self.reset_reference(), "right2"),
+        ]
+
+    def reset_reference(self):
+        """RESET: forget everything and take a new empty-table picture (clear the table first)."""
+        self.reference = None
+        self.cards = []
+        self.tracker.reset()
+        self._ref_frames, self._ref_pending = [], 0
+        self._ref_countdown = RESET_DELAY
+
     # --- per frame -----------------------------------------------------------
     def update(self, dt, app):
         if cv2 is None or not app.calib.ok:
             return
         frame = app.camera.latest()
         if frame is None:
+            return
+        if self._ref_countdown > 0:
+            self._ref_countdown -= dt
+            if self._ref_countdown <= 0:
+                self.key("b", app)
+        if app.panel.busy():                 # a hand is on a button: keep the last picture (cards, board) until it leaves
             return
         self.frame = frame
         if self._ref_H is not None and not np.allclose(self._ref_H, app.calib.H):
@@ -148,10 +184,12 @@ class CardCapture(Module):
             return "Calibrate first (key 2)", False
         if not app.camera.is_on:
             return "Cam OFF", False
+        if self._ref_countdown > 0:
+            return f"Clear the table: reference in {math.ceil(self._ref_countdown)}", True
         if self._ref_pending:
             return "Taking reference ...", True
         if self.reference is None:
-            return "Empty table, then press B", True
+            return "Waiting for the camera ...", True
         probs = self.problems()
         if "crosses_center" in probs:
             return "Card on the center line", False
@@ -165,39 +203,48 @@ class CardCapture(Module):
             return "Place the cards", True
         if not self.tracker.stable:
             return "Hold still ...", True
-        return "Ready: press S to save", True
+        return "Ready: hold your hand on SAVE", True
+
+    def hint(self, app):
+        """(text, mode) for the second header line."""
+        if time.time() < self.msg_until:
+            return self.msg, "info"
+        text, ok = self.status_text(app)
+        if not ok:
+            return text, "warn"
+        if text.startswith(("Ready", "Clear the table", "Place the cards")):
+            return text, "blink"                # needs the user to act
+        return text, "info"
 
     # --- drawing -------------------------------------------------------------------
     def draw(self, surf, app):
         w, h = surf.get_size()
-        hud_y = round(cfg.HUD_FRAC * h)
-        draw_vline(surf, w // 2)
-        size, sy = round(h * 0.055), round(h * 0.055)             # small symbols, high up
+        hud_y = round(opt("HUD_FRAC") * h)
+        draw_vline(surf, w // 2)                                   # center line: top to bottom, splits - and +
+        cy = row_center(h)                                         # counters share the row of the buttons
+        size = round(h * 0.055)
+        font = app.board.font(h * 0.07, "Black")
         n = self.counts()
-        font = app.board.font(h * 0.06)
-        for side, cx, draw_sym in (("-", w // 4, draw_minus), ("+", 3 * w // 4, draw_plus)):
-            draw_sym(surf, (cx - size, sy), size)
-            # number of recognized cards right next to the symbol
-            draw_text(surf, font, str(n[side]), (cx + round(size * 0.9), sy),
-                      config.CAM_ON_COLOR if n[side] else config.TEXT_COLOR, anchor="midleft")
+        g = round(0.08 * w - size / 2)                             # distance center line -> symbol (same on both sides)
+        for side in ("-", "+"):
+            img = font.render(str(n[side]), True, config.CAM_ON_COLOR if n[side] else config.TEXT_COLOR)
+            if side == "-":                                        # number next to the center line, symbol to its left
+                rect = img.get_rect(midright=(w // 2 - g, cy))
+                sx = rect.left - round(size * 0.45) - size // 2
+                draw_minus(surf, (sx, cy), size)
+            else:                                                  # symbol next to the center line, number to its right
+                sx = w // 2 + g + size // 2
+                draw_plus(surf, (sx, cy), size)
+                rect = img.get_rect(midleft=(sx + round(size * 0.95), cy))
+            surf.blit(img, rect)
         pygame.draw.line(surf, (70, 70, 70), (0, hud_y), (w, hud_y), 2)      # cards go below this line
-
-        if time.time() < self.msg_until:
-            text, ok = self.msg, True
-        else:
-            text, ok = self.status_text(app)
-        small = app.board.font(h * 0.04)
-        img = small.render(text, True, config.TEXT_COLOR if ok else config.CAM_OFF_COLOR)
-        rect = img.get_rect(center=(w // 2, round(h * 0.115)))
-        pygame.draw.rect(surf, config.BG_COLOR, rect.inflate(24, 6))          # hides the center line behind the text
-        surf.blit(img, rect)
 
     # --- preview on the laptop screen -------------------------------------------------
     def overlay_image(self):
         img = self.board.copy()
         bh, bw = img.shape[:2]
         cv2.line(img, (bw // 2, 0), (bw // 2, bh), (90, 90, 90), 1)
-        cv2.line(img, (0, int(cfg.HUD_FRAC * bh)), (bw, int(cfg.HUD_FRAC * bh)), (90, 90, 90), 1)
+        cv2.line(img, (0, int(opt("HUD_FRAC") * bh)), (bw, int(opt("HUD_FRAC") * bh)), (90, 90, 90), 1)
         for i, c in enumerate(sorted(self.cards, key=lambda c: (c.side, c.center[1], c.center[0])), 1):
             col = BAD if c.flags else COLORS[c.side]
             cv2.polylines(img, [c.box.astype(np.int32)], True, col, 3)

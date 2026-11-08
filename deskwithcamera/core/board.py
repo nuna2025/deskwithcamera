@@ -1,43 +1,58 @@
-"""Base board: 16:9 frame + "Cam" status at the top left + module title at the top right.
+"""Base board: header + 16:9 frame.
+
+   DeskWithCamera          Hint (always bright green,            Home
+   (red, italic)           blinks when urgent, 1-2 lines)        (green)
+      ┌──────────────────────────────────────────────────────┐
+      │                                                      │
+      │          (the module draws here)                     │
+      │                                                      │
+      └──────────────────────────────────────────────────────┘
+
+  * left:   the program name on the Home screen, otherwise the module's theme name (e.g. "Classification").
+            Red, italic, bold. Its first letter sticks out to the left of the frame.
+  * right:  the screen name (e.g. "Home", "Card capture"). Bright green. Its last letter sticks out to the right.
+  * middle: the explanation, exactly centered above the frame. Always bright green. If it is too long it
+            gets a second line, and only if that is not enough the letters get smaller.
+  All three texts stand on ONE common baseline, the same distance above the frame.
 
 Every module draws only INSIDE this board. A module receives a Surface cut out
 of the frame's inner area, so coordinate (0, 0) is the top-left corner inside
 the frame.
-
-      Cam: ON                                   Module title
-      ┌──────────────────────────────────────────────────┐
-      │                                                  │
-      │          (the module draws here)                 │
-      │                                                  │
-      └──────────────────────────────────────────────────┘
 """
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import pygame
 
 import config
+from core.opts import opt
 
 FALLBACK_FONTS = "malgungothic,applegothic,notosanscjkkr,nanumgothic,arial"   # used if a font file is missing
 FONT_ROOT = Path(__file__).resolve().parent.parent
+LINE_FACTOR = 1.25                                                               # line height / font size
+TITLE_SCALE = 2 * 2 / 3                                                          # left title = 4/3 of the header size
+LINE_SPACING = 0.95                                                              # two-line hint: line height / font height
 
 
 @dataclass
 class Layout:
     frame: pygame.Rect      # outer rectangle where the line is drawn
     inner: pygame.Rect      # inside the line = area used by modules
-    header_y: int           # top y of the header text
+    header_y: int           # top y of the header
+    header_h: int           # height of the header (without the gap to the frame)
     font_size: int
 
 
 def compute_layout(width, height):
     """Place header + 16:9 frame centered on the screen."""
     font_size = max(14, round(height * config.HEADER_FONT_RATIO))
-    header_h = round(font_size * 1.3) + config.HEADER_GAP
+    header_h = round(font_size * LINE_FACTOR) * 2                   # room for a two-line hint
+    block_h = header_h + config.HEADER_GAP
     margin = round(min(width, height) * config.MARGIN)
 
     avail_w = width - 2 * margin
-    avail_h = height - 2 * margin - header_h
+    avail_h = height - 2 * margin - block_h
     ar = config.ASPECT[0] / config.ASPECT[1]
     if avail_w / avail_h > ar:
         fh = avail_h
@@ -46,56 +61,108 @@ def compute_layout(width, height):
         fw = avail_w
         fh = fw / ar
 
-    top = (height - (header_h + fh)) / 2
-    frame = pygame.Rect(round((width - fw) / 2), round(top + header_h),
+    top = (height - (block_h + fh)) / 2
+    frame = pygame.Rect(round((width - fw) / 2), round(top + block_h),
                         round(fw), round(fh))
     lw = config.LINE_WIDTH
     inner = frame.inflate(-2 * lw, -2 * lw)             # (the thin outer line is drawn OUTSIDE the frame rect)
-    return Layout(frame, inner, round(top), font_size)
+    return Layout(frame, inner, round(top), header_h, font_size)
+
+
+def blink_visible(now=None):
+    """True while a blinking text should be visible (cycle BLINK_PERIOD seconds)."""
+    now = time.time() if now is None else now
+    period = opt("BLINK_PERIOD")
+    return (now % period) < period * opt("BLINK_ON")
+
+
+def wrap2(font, text, max_w):
+    """One line if it fits, otherwise two balanced lines (the widest of the two as narrow as possible)."""
+    if font.size(text)[0] <= max_w:
+        return [text]
+    words = text.split()
+    best = None
+    for i in range(1, len(words)):
+        a, b = " ".join(words[:i]), " ".join(words[i:])
+        width = max(font.size(a)[0], font.size(b)[0])
+        if best is None or width < best[0]:
+            best = (width, [a, b])
+    return best[1] if best else [text]
 
 
 class Board:
     def __init__(self):
         self._fonts = {}
 
-    def font(self, size, weight=None):
-        """Hahmlet font in the given pixel size. weight: "Medium", "Bold", "ExtraBold" ... (default config.TEXT_WEIGHT)."""
+    def font(self, size, weight=None, italic=False):
+        """Hahmlet font in the given pixel size. weight: "Medium", "Bold", "ExtraBold", "Black" ... (default config.TEXT_WEIGHT)."""
         size = max(8, int(size))
         weight = weight or config.TEXT_WEIGHT
-        key = (size, weight)
+        key = (size, weight, italic)
         if key not in self._fonts:
             path = FONT_ROOT / config.FONT_DIR / f"{config.FONT_FAMILY}-{weight}.ttf"
             if path.exists():
-                self._fonts[key] = pygame.font.Font(str(path), size)
+                f = pygame.font.Font(str(path), size)
             else:
                 print(f"[board] font file not found: {path} (using a system font instead)")
-                self._fonts[key] = pygame.font.SysFont(FALLBACK_FONTS, size)
+                f = pygame.font.SysFont(FALLBACK_FONTS, size)
+            if italic:
+                f.set_italic(True)
+            self._fonts[key] = f
         return self._fonts[key]
 
-    def draw(self, screen, title, cam_on):
-        """Draw background, header and frame; return the content Surface for the module."""
+    def draw(self, screen, left="", right="", hint="", mode="info", now=None):
+        """Draw background, header and frame; return the content Surface for the module.
+
+        left = red italic title (top left), right = screen name (top right),
+        hint = explanation in the middle, mode = "info" | "blink" (blinking = the user has to act).
+        """
         lay = compute_layout(*screen.get_size())
+        f = lay.font_size
         screen.fill(config.BG_COLOR)
-        font = self.font(lay.font_size, config.HEADER_WEIGHT)
+        fr, ow = lay.frame, config.OUTER_LINE_WIDTH
+        base_y = fr.top - ow - round(f * 0.45)                  # ONE baseline for all three texts
 
-        # Top left: Cam: ON / OFF (live)
-        if config.SHOW_CAM_STATUS:
-            label = font.render("Cam: ", True, config.CAM_LABEL_COLOR)
-            state = font.render("ON" if cam_on else "OFF", True,
-                                config.CAM_ON_COLOR if cam_on else config.CAM_OFF_COLOR)
-            x = lay.frame.left
-            screen.blit(label, (x, lay.header_y))
-            screen.blit(state, (x + label.get_width(), lay.header_y))
+        def put(font, text, color, x, anchor):
+            img = font.render(text, True, color)
+            r = img.get_rect()
+            setattr(r, anchor, (x, base_y - font.get_ascent()))
+            screen.blit(img, r)
+            return r
 
-        # Top right: module title
-        t = font.render(title, True, config.TEXT_COLOR)
-        screen.blit(t, (lay.frame.right - t.get_width(), lay.header_y))
+        # left: red italic title; one letter sticks out to the left of the frame
+        r_left = pygame.Rect(fr.left, 0, 0, 0)
+        if left:
+            title = self.font(f * TITLE_SCALE, config.HEADER_WEIGHT, italic=True)
+            r_left = put(title, left, config.CAM_LABEL_COLOR, fr.left - title.size(left[0])[0], "topleft")
 
-        # Frame: thin outer line (blue) around a thicker red line, both with slightly rounded corners
-        r, ow = config.CORNER_RADIUS, config.OUTER_LINE_WIDTH
+        # right: screen name; one letter sticks out to the right of the frame
+        r_right = pygame.Rect(fr.right, 0, 0, 0)
+        if right:
+            big = self.font(f, config.HEADER_WEIGHT)
+            r_right = put(big, right, config.CAM_ON_COLOR, fr.right + big.size(right[-1])[0], "topright")
+
+        # middle: hint exactly centered; 2 lines if long, then smaller letters if still too long
+        if hint and (mode != "blink" or blink_visible(now)):
+            size = max(10, round(f * opt("HINT_SCALE")))
+            mid = self.font(size, config.TEXT_WEIGHT)
+            half = min(fr.centerx - r_left.right, r_right.left - fr.centerx) - round(f * 0.8)
+            half = max(half, round(f * 3))
+            lines = wrap2(mid, hint, half * 2)
+            while max(mid.size(t)[0] for t in lines) > half * 2 and size > 12:
+                size -= 2
+                mid = self.font(size, config.TEXT_WEIGHT)
+                lines = wrap2(mid, hint, half * 2)
+            lh = round(mid.get_height() * LINE_SPACING)
+            for i, line in enumerate(reversed(lines)):          # the last line stands on the baseline
+                img = mid.render(line, True, config.CAM_ON_COLOR)
+                screen.blit(img, img.get_rect(midtop=(fr.centerx, base_y - mid.get_ascent() - i * lh)))
+
+        # Frame: thin outer line (blue) around a thicker line, both with slightly rounded corners
+        r = config.CORNER_RADIUS
         if ow > 0:
-            pygame.draw.rect(screen, config.FRAME_OUTER_COLOR, lay.frame.inflate(2 * ow, 2 * ow), ow,
+            pygame.draw.rect(screen, config.FRAME_OUTER_COLOR, fr.inflate(2 * ow, 2 * ow), ow,
                              border_radius=r + ow)
-        pygame.draw.rect(screen, config.FRAME_COLOR, lay.frame, config.LINE_WIDTH, border_radius=r)
+        pygame.draw.rect(screen, config.FRAME_COLOR, fr, config.LINE_WIDTH, border_radius=r)
 
         return screen.subsurface(lay.inner)

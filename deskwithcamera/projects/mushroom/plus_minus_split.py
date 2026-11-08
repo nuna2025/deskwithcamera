@@ -15,6 +15,7 @@ LABELS = {"+": "poisonous", "-": "safe"}
 
 class PlusMinusSplit(Module):
     title = "+ / -"
+    area = "Classification"
 
     def zone_of(self, x, width):
         """Is the x coordinate (content area) in the left or the right cell? Returns "-" or "+"."""
@@ -27,7 +28,7 @@ class PlusMinusSplit(Module):
     def draw(self, surf, app):
         w, h = surf.get_size()
         draw_vline(surf, w // 2)
-        size = round(h * 0.12)
-        y = round(h * 0.15)
+        size = round(h * 0.10)
+        y = round(h * 0.34)                  # below the button row
         for symbol, cx in ((LEFT_ZONE, w // 4), (RIGHT_ZONE, 3 * w // 4)):
             (draw_plus if symbol == "+" else draw_minus)(surf, (cx, y), size)
