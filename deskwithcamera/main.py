@@ -34,7 +34,8 @@ def choose_start(app, modules, tools, force_calibration):
 def main():
     projects = discover()
     p = argparse.ArgumentParser()
-    p.add_argument("--project", default=config.DEFAULT_PROJECT, help="folder name inside projects/")
+    p.add_argument("--project", default=None,
+                   help="start only this project (folder name inside projects/); without it the Home screen starts")
     p.add_argument("--profile", choices=list(config.PROFILES), default=config.DISPLAY_PROFILE)
     p.add_argument("--camera", type=int, help="camera index (overrides config.CAMERA_INDEX)")
     p.add_argument("--calibrate", action="store_true",
@@ -48,12 +49,12 @@ def main():
         for name, info in projects.items():
             print(f"{name:20s} {info.title}  -  {info.description}")
         return
-    if args.project not in projects:
+    if args.project is not None and args.project not in projects:
         sys.exit(f"Unknown project '{args.project}'. Available: {', '.join(projects)}")
     if args.camera is not None:
         config.CAMERA_INDEX = args.camera
 
-    if args.home:
+    if args.home or args.project is None:
         tools = tool_modules()
         home = HomeModule()
         project_modules = [m for pr in projects.values() for m in pr.modules()]
