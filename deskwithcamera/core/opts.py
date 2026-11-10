@@ -12,7 +12,11 @@ DEFAULTS = {
     "BLINK_ON": 0.65,               # fraction of the cycle the text is visible
 
     # --- layout -------------------------------------------------------------------
-    "HUD_FRAC": 0.19,               # top part of the content area: buttons + counters. Cards go BELOW this line
+    "SIDE_MARGIN": 0.07,            # minimum free space left and right of the frame (fraction of the screen width).
+                                    # The first letter of the title and the last letter of the screen name stick out
+                                    # of the frame; a projector may also cut a little off the edges. Raise it if
+                                    # letters are still cut off, lower it for a bigger frame.
+    "HUD_FRAC": 0.19,              # top part of the content area: buttons + counters. Cards go BELOW this line
 
     # --- button shapes (fractions of the content area) ---------------------------------
     "BUTTON_W": 0.11,               # width of a rectangular button (fraction of the content width)

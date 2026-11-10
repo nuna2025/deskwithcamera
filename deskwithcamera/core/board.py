@@ -50,8 +50,9 @@ def compute_layout(width, height):
     header_h = round(font_size * LINE_FACTOR) * 2                   # room for a two-line hint
     block_h = header_h + config.HEADER_GAP
     margin = round(min(width, height) * config.MARGIN)
+    margin_x = max(margin, round(width * opt("SIDE_MARGIN")))      # room for the letters that stick out + projector crop
 
-    avail_w = width - 2 * margin
+    avail_w = width - 2 * margin_x
     avail_h = height - 2 * margin - block_h
     ar = config.ASPECT[0] / config.ASPECT[1]
     if avail_w / avail_h > ar:

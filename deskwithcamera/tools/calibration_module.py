@@ -39,6 +39,7 @@ def marker_layout(w, h):
 
 class CalibrationModule(Module):
     title = "Calibration"
+    show_home = False            # no HOME button here: it would cover marker 0
 
     def __init__(self):
         self.state = "search"            # "search" | "done"
