@@ -8,14 +8,15 @@ import config
 DEFAULTS = {
     # --- header -----------------------------------------------------------------
     "HINT_SCALE": 0.85,             # size of the centered hint relative to the normal header text (1.0 = same size)
+    "TITLE_SCALE": 1.0,             # size of the red title on the left relative to the header text (1.33 = the first size)
+    "RIGHT_SCALE": 0.9,             # size of the screen name on the right (1.0 = the earlier size); its end position stays the same
     "BLINK_PERIOD": 1.0,            # seconds for one blink cycle (attention messages)
     "BLINK_ON": 0.65,               # fraction of the cycle the text is visible
 
     # --- layout -------------------------------------------------------------------
-    "SIDE_MARGIN": 0.07,            # minimum free space left and right of the frame (fraction of the screen width).
-                                    # The first letter of the title and the last letter of the screen name stick out
-                                    # of the frame; a projector may also cut a little off the edges. Raise it if
-                                    # letters are still cut off, lower it for a bigger frame.
+    "SAFE_INSET": 0.03,             # header texts keep at least this distance from the screen edge (fraction of the
+                                    # screen width). The frame leaves room for the letter that sticks out at the side,
+                                    # so a projector that cuts off the edges does not cut letters. 0 = switched off
     "HUD_FRAC": 0.19,              # top part of the content area: buttons + counters. Cards go BELOW this line
 
     # --- button shapes (fractions of the content area) ---------------------------------

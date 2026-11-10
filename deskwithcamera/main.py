@@ -60,7 +60,8 @@ def main():
         project_modules = [m for pr in projects.values() for m in pr.modules()]
         modules = tools + [home] + project_modules      # tools (keys 1-3), Home, then every module
         home.set_entries([(m.menu_label, m.menu_caption, i) for i, m in enumerate(modules) if m.menu_label])
-        app = App(modules, profile=args.profile, project_title="Table games", home_index=len(tools))
+        app = App(modules, profile=args.profile, project_title="DeskWithCamera", home_index=len(tools))
+        
     else:
         info = projects[args.project]
         tools = tool_modules() if info.include_tools else []

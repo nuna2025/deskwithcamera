@@ -3,11 +3,14 @@
 
 # --- header ---
 HINT_SCALE = 0.85              # size of the centered explanation (1.0 = as big as the right-hand screen name)
+TITLE_SCALE = 1.2              # red title on the left, relative to the header text (1.33 = bigger, earlier size)
 BLINK_PERIOD = 1.0             # seconds per blink cycle (attention messages)
 BLINK_ON = 0.65                # fraction of the cycle the text is visible
 
 # --- layout ---
-HUD_FRAC = 0.19                # top part: button row + counters. Cards go BELOW this line
+SAFE_INSET = 0.03              # header texts keep this distance from the screen edge (fraction of screen width). Raise it if
+                               # letters are still cut off at the projector edge, 0 = off (original look)
+HUD_FRAC = 0.19               # top part: button row + counters. Cards go BELOW this line
 
 # --- button shapes (fractions of the content area) ---
 BUTTON_W = 0.11                # rectangular button: width  (fraction of the content width)

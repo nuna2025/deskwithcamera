@@ -31,7 +31,6 @@ from core.opts import opt
 FALLBACK_FONTS = "malgungothic,applegothic,notosanscjkkr,nanumgothic,arial"   # used if a font file is missing
 FONT_ROOT = Path(__file__).resolve().parent.parent
 LINE_FACTOR = 1.25                                                               # line height / font size
-TITLE_SCALE = 2 * 2 / 3                                                          # left title = 4/3 of the header size
 LINE_SPACING = 0.95                                                              # two-line hint: line height / font height
 
 
@@ -50,7 +49,11 @@ def compute_layout(width, height):
     header_h = round(font_size * LINE_FACTOR) * 2                   # room for a two-line hint
     block_h = header_h + config.HEADER_GAP
     margin = round(min(width, height) * config.MARGIN)
-    margin_x = max(margin, round(width * opt("SIDE_MARGIN")))      # room for the letters that stick out + projector crop
+    # Free space left/right: the first letter of the title (and the last one of the screen name) stick out of the
+    # frame, and a projector may cut a little off the edges -> keep room for both. (Only matters on screens that are
+    # wider than 16:9 relative to their height, e.g. 16:10; on 16:9 the frame is limited by the height anyway.)
+    safe = round(width * opt("SAFE_INSET"))
+    margin_x = max(margin, safe + round(font_size * 1.3))          # room for about one letter that sticks out
 
     avail_w = width - 2 * margin_x
     avail_h = height - 2 * margin - block_h
@@ -131,23 +134,30 @@ class Board:
             screen.blit(img, r)
             return r
 
+        # Safe inset: the header texts never come closer to the screen edge than this (a projector often
+        # cuts a little off the edges). The letter that sticks out of the frame then sticks out a bit less.
+        safe = round(screen.get_width() * opt("SAFE_INSET"))
+
         # left: red italic title; one letter sticks out to the left of the frame
         r_left = pygame.Rect(fr.left, 0, 0, 0)
         if left:
-            title = self.font(f * TITLE_SCALE, config.HEADER_WEIGHT, italic=True)
-            r_left = put(title, left, config.CAM_LABEL_COLOR, fr.left - title.size(left[0])[0], "topleft")
+            title = self.font(f * opt("TITLE_SCALE"), config.HEADER_WEIGHT, italic=True)
+            x = max(fr.left - title.size(left[0])[0], safe)
+            r_left = put(title, left, config.CAM_LABEL_COLOR, x, "topleft")
 
         # right: screen name; one letter sticks out to the right of the frame
         r_right = pygame.Rect(fr.right, 0, 0, 0)
         if right:
-            big = self.font(f, config.HEADER_WEIGHT)
-            r_right = put(big, right, config.CAM_ON_COLOR, fr.right + big.size(right[-1])[0], "topright")
+            big = self.font(f * opt("RIGHT_SCALE"), config.HEADER_WEIGHT)
+            ref = self.font(f, config.HEADER_WEIGHT)             # the end position stays where it was (set by the normal size)
+            x = min(fr.right + ref.size(right[-1])[0], screen.get_width() - safe)
+            r_right = put(big, right, config.CAM_ON_COLOR, x, "topright")
 
         # middle: hint exactly centered; 2 lines if long, then smaller letters if still too long
         if hint and (mode != "blink" or blink_visible(now)):
             size = max(10, round(f * opt("HINT_SCALE")))
             mid = self.font(size, config.TEXT_WEIGHT)
-            half = min(fr.centerx - r_left.right, r_right.left - fr.centerx) - round(f * 0.8)
+            half = min(fr.centerx - r_left.right, r_right.left - fr.centerx) - round(f * 0.5)
             half = max(half, round(f * 3))
             lines = wrap2(mid, hint, half * 2)
             while max(mid.size(t)[0] for t in lines) > half * 2 and size > 12:
