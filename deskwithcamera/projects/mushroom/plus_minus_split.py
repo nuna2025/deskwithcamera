@@ -5,8 +5,9 @@
 
 This is the base screen of the mushroom sorting game.
 """
+import config
 from core.module import Module
-from core.shapes import draw_minus, draw_plus, draw_vline
+from core.shapes import draw_lower_bg, draw_minus, draw_plus, draw_split_line
 
 LEFT_ZONE = "-"           # swap these two (and the labels below) to put + on the left
 RIGHT_ZONE = "+"
@@ -27,8 +28,9 @@ class PlusMinusSplit(Module):
 
     def draw(self, surf, app):
         w, h = surf.get_size()
-        draw_vline(surf, w // 2)
+        draw_lower_bg(surf)
+        draw_split_line(surf, w // 2)
         size = round(h * 0.10)
         y = round(h * 0.34)                  # below the button row
         for symbol, cx in ((LEFT_ZONE, w // 4), (RIGHT_ZONE, 3 * w // 4)):
-            (draw_plus if symbol == "+" else draw_minus)(surf, (cx, y), size)
+            (draw_plus if symbol == "+" else draw_minus)(surf, (cx, y), size, config.BG_COLOR)

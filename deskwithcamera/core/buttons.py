@@ -119,6 +119,14 @@ class ButtonPanel:
         self._base = {}
         self._acc = {}
         self._acc_n = 0
+        self._stuck = 0.0           # seconds a fired button has been waiting although it may be a stale baseline
+        self._rebase = False
+        self._dt = 0.0
+        self._en_prev = {}          # enabled state of every button in the last frame
+        self._resettle = {}         # button -> seconds left to wait after its look changed (dim <-> bright)
+        self._frac = {}             # last changed fraction per zone (for the log line when a button fires)
+        self._global_t = 0.0        # seconds the WHOLE picture has been different (shadow of a body, exposure change)
+        self._prev_cells = {}       # coarse picture of every zone in the last frame (to see movement)
 
     # --- setup ---------------------------------------------------------------------------
     def set_buttons(self, specs):
@@ -126,6 +134,8 @@ class ButtonPanel:
         self.states = {s.name: _State() for s in self.specs}
         self.phase, self._t = "settle", 0.0
         self._base, self._acc, self._acc_n = {}, {}, 0
+        self._stuck, self._rebase = 0.0, False
+        self._en_prev, self._resettle = {}, {}
 
     # --- camera zones -----------------------------------------------------------------------
     def _zone(self, rect, gray, size):
@@ -142,11 +152,28 @@ class ButtonPanel:
         rects["_witness"] = witness_rect(*size)
         return rects
 
+    @staticmethod
+    def _cells(z):
+        """Zone reduced to about 8 x 4 block averages (camera noise averages out, real movement stays)."""
+        h, w = z.shape
+        ch, cw = max(h // 4, 1), max(w // 8, 1)
+        return z[:h // ch * ch, :w // cw * cw].reshape(h // ch, ch, w // cw, cw).mean(axis=(1, 3))
+
+    def _moving(self, name, z):
+        """True while the picture in this zone changes from frame to frame (an arm passing by, not a hand held still)."""
+        c = self._cells(z)
+        prev = self._prev_cells.get(name)
+        self._prev_cells[name] = c
+        return prev is not None and prev.shape == c.shape and float(np.abs(c - prev).mean()) > opt("BUTTON_MOTION_THR")
+
     def _frac_changed(self, name, cur):
         base = self._base.get(name)
         if base is None or base.shape != cur.shape:
             return None
-        return float((np.abs(cur - base) > opt("BUTTON_DIFF_THR")).mean())
+        d = cur - base                                    # a hand lit by the projector is BRIGHTER than the dark button;
+        if not opt("BUTTON_ONLY_BRIGHTER"):               # a shadow (or the arm's shade) is only darker -> ignore it
+            d = np.abs(d)
+        return float((d > opt("BUTTON_DIFF_THR")).mean())
 
     # --- one step --------------------------------------------------------------------------------
     def update(self, dt, app, size, board_gray=None, mouse=None):
@@ -157,6 +184,7 @@ class ButtonPanel:
         if not self.specs:
             return
         self._t += dt
+        self._dt = dt
 
         if self.phase == "settle":
             if self._t >= opt("BUTTON_SETTLE"):
@@ -200,32 +228,82 @@ class ButtonPanel:
                 st.absent = 0.0 if here else st.absent + dt
                 if st.absent >= opt("BUTTON_RELEASE"):
                     st.mode, st.t, st.armed = "idle", 0.0, True
+        # a button that waits for the hand to leave for too long: the picture of the empty buttons is stale
+        # (e.g. the camera exposure changed) -> take a new one instead of nagging the user forever
+        if any(st.mode == "wait" for st in self.states.values()):
+            self._stuck += dt
+            if self._stuck >= opt("BUTTON_STUCK_SECONDS"):
+                self._rebase, self._stuck = True, 0.0
+                print("[buttons] a button still sees 'a hand' after "
+                      f"{opt('BUTTON_STUCK_SECONDS'):.0f} s: taking a new picture of the empty buttons")
+        else:
+            self._stuck = 0.0
         # while one button waits for the hand to leave, no other button may start
         if any(st.mode == "wait" for st in self.states.values()):
             for st in self.states.values():
                 if st.mode == "holding":
                     st.mode, st.t = "idle", 0.0
         for s in fired:
+            print(f"[buttons] {s.name} fired (changed fraction {self._frac.get(s.name, 0):.2f}, "
+                  f"threshold {opt('BUTTON_PRESENT_FRAC'):.2f})")
             s.action(app)
 
     def _presence(self, gray, mouse, size, app):
         pres = {s.name: False for s in self.specs}
+        for s in self.specs:                            # a button changes its look when it becomes (dis)abled (dim <-> bright):
+            en = s.enabled is None or bool(s.enabled(app))
+            if self._en_prev.get(s.name, en) != en:
+                self._resettle[s.name] = opt("BUTTON_RESETTLE")    # ... wait, then learn the new look as 'empty'
+                self.states[s.name] = _State()
+                self.states[s.name].armed = True
+            self._en_prev[s.name] = en
         if gray is not None and self._base:
             rects = self._all_rects(size)
             cur = {n: self._zone(r, gray, size) for n, r in rects.items()}
+            wb = self._base.get("_witness")
+            if wb is not None and wb.shape == cur["_witness"].shape and cur["_witness"].mean() > 1:
+                g = float(wb.mean() / cur["_witness"].mean())     # the quiet strip got brighter/darker: exposure
+                if 0.5 < g < 2.0 and abs(g - 1) > 0.03:           # -> bring every zone back to the old brightness
+                    cur = {n: np.clip(z * g, 0, 255) for n, z in cur.items()}
             wfrac = self._frac_changed("_witness", cur["_witness"])
-            if wfrac is None or wfrac > 0.5:
-                self._base = dict(cur)                 # the whole picture changed: start again, nobody pressed
+            if self._rebase:
+                self._rebase = False
+                self._base = dict(cur)
+                self._frac = {}
+                for s in self.specs:
+                    self.states[s.name] = _State()
+                    self.states[s.name].armed = True
+                return pres
+            if wfrac is None:
+                self._base = dict(cur)
+            elif wfrac > 0.5:
+                # The WHOLE picture changed: a body in the beam (shadow) or a new exposure. Nobody presses now, but the old
+                # picture of the empty buttons is kept: when the shadow leaves again, everything is as before. Only when
+                # the change stays, it becomes the new normal.
+                self._global_t += self._dt
+                if self._global_t >= opt("BUTTON_GLOBAL_SECONDS"):
+                    self._base, self._global_t = dict(cur), 0.0
+                for s in self.specs:
+                    if self.states[s.name].mode == "holding":
+                        self.states[s.name].mode, self.states[s.name].t = "idle", 0.0
+                return pres
             else:
+                self._global_t = 0.0
                 for name, z in cur.items():
+                    if self._resettle.get(name, 0) > 0:           # look of this button just changed: learn it, no hand
+                        self._resettle[name] -= self._dt
+                        self._base[name] = z
+                        continue
                     frac = self._frac_changed(name, z)
+                    self._frac[name] = frac or 0.0
                     if frac is None:
                         self._base[name] = z
                     elif name == "_witness" or frac <= opt("BUTTON_PRESENT_FRAC"):
                         a = opt("BUTTON_BASELINE_ALPHA")
                         self._base[name] = self._base[name] + a * (z - self._base[name])   # follow slow drift
-                    if name != "_witness" and frac is not None and frac > opt("BUTTON_PRESENT_FRAC"):
-                        pres[name] = True
+                    moving = self._moving(name, z)
+                    if name != "_witness" and frac is not None and frac > opt("BUTTON_PRESENT_FRAC") and not moving:
+                        pres[name] = True              # (a hand that is still moving does not press: it is just passing)
         if mouse is not None and opt("BUTTON_MOUSE"):
             for s in self.specs:
                 if self.rects[s.name].collidepoint(mouse):

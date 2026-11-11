@@ -3,7 +3,8 @@
 Workflow
     1. Calibrate first (key 2). The camera must see the whole frame.
     2. Clear the table: the empty-table reference picture is taken by itself a few seconds after the
-       module starts (and again after RESET). Key: B = take it now.
+       module starts. Key: B = take a new one now (e.g. after the light or the camera changed).
+       RESET keeps it and just looks at the table again (cards already lying there are found again).
     3. Put the cards BELOW the gray line, completely inside their half (+ right, - left), not touching
     4. Wait until the header says "Ready"  ->  hold a hand on SAVE  (or press S)
 
@@ -22,9 +23,9 @@ import config
 from core.buttons import ButtonSpec, row_center
 from core.module import Module
 from core.opts import opt
-from core.shapes import draw_minus, draw_plus, draw_vline
+from core.shapes import draw_lower_bg, draw_minus, draw_plus, draw_split_line
 from projects.mushroom import settings as cfg
-from projects.mushroom.cards import StabilityTracker, detect_cards, rectify
+from projects.mushroom.cards import StabilityTracker, clean_reference, detect_cards, rectify
 from projects.mushroom.dataset import save_session
 from projects.mushroom.plus_minus_split import LABELS
 
@@ -40,6 +41,7 @@ BAD = (0, 0, 255)
 
 REF_DELAY = 3.0              # seconds after the module starts until the empty-table picture is taken
 RESET_DELAY = 2.5            # ... after RESET
+HAND_GRACE = 2.5             # a huge / irregular blob (hand, arm, shadow) shorter than this is ignored: the last result stays
 
 
 class CardCapture(Module):
@@ -59,6 +61,8 @@ class CardCapture(Module):
         self._ref_frames = []
         self._ref_pending = 0
         self._ref_countdown = 0.0        # > 0: seconds until the reference is taken (hands away!)
+        self._hand = False               # a hand / arm / shadow is in the picture right now
+        self._hand_t = 0.0
         self.cards = []
         self.tracker = StabilityTracker()
         self.board = None
@@ -104,14 +108,21 @@ class CardCapture(Module):
     def buttons(self, app):
         return [
             ButtonSpec("save", "SAVE", lambda app: self.save(app), "right", enabled=lambda app: self.can_save()),
-            ButtonSpec("reset", "RESET", lambda app: self.reset_reference(), "right2"),
+            ButtonSpec("reset", "RESET", lambda app: self.reset_reference(), "right2", hold=3.0),   # destroys the cards: longer hold
         ]
 
     def reset_reference(self):
-        """RESET: forget everything and take a new empty-table picture (clear the table first)."""
-        self.reference = None
+        """RESET: forget the cards found so far and look at the table again.
+
+        The empty-table picture is KEPT, so cards that are already lying on the table are found again
+        right away (no need to clear the table). Only if there is no empty-table picture yet, a new one
+        is taken (clear the table first). Key B always takes a new empty-table picture."""
         self.cards = []
+        self._hand, self._hand_t = False, 0.0
         self.tracker.reset()
+        if self.reference is not None:
+            self.say("Looking at the table again ...", 2.0)
+            return
         self._ref_frames, self._ref_pending = [], 0
         self._ref_countdown = RESET_DELAY
 
@@ -137,12 +148,20 @@ class CardCapture(Module):
             self._ref_frames.append(self.board)
             self._ref_pending -= 1
             if self._ref_pending == 0:
-                self.reference = np.median(np.array(self._ref_frames), axis=0).astype(np.uint8)
+                ref = np.median(np.array(self._ref_frames), axis=0).astype(np.uint8)
+                self.reference, n_there = clean_reference(ref)      # cards that already lie on the table are not 'empty table'
+                if n_there:
+                    self.say(f"{n_there} card(s) were already on the table", 3.0)
                 self._ref_H = app.calib.H.copy()
                 self._ref_frames = []
         elif self.reference is not None:
-            self.cards, self.mask = detect_cards(self.board, self.reference, return_mask=True)
-            self.tracker.update(self.cards)
+            cards, self.mask = detect_cards(self.board, self.reference, return_mask=True)
+            odd = any({"too_big", "irregular"} & set(c.flags) for c in cards)     # not a card: hand, arm, shadow
+            self._hand_t = self._hand_t + dt if odd else 0.0
+            self._hand = odd and self._hand_t < HAND_GRACE
+            if not self._hand:                            # (while a hand is in view the last result stays)
+                self.cards = cards
+                self.tracker.update(self.cards)
 
         if self._preview_on:
             self._show_preview(app)
@@ -158,7 +177,7 @@ class CardCapture(Module):
         return [f for c in self.cards for f in c.flags]
 
     def can_save(self):
-        if self.reference is None or not self.tracker.stable or not self.cards or self.problems():
+        if self.reference is None or self._hand or not self.tracker.stable or not self.cards or self.problems():
             return False
         return True
 
@@ -190,6 +209,8 @@ class CardCapture(Module):
             return "Taking reference ...", True
         if self.reference is None:
             return "Waiting for the camera ...", True
+        if self._hand:
+            return "Hand in view ...", True
         probs = self.problems()
         if "crosses_center" in probs:
             return "Card on the center line", False
@@ -219,8 +240,8 @@ class CardCapture(Module):
     # --- drawing -------------------------------------------------------------------
     def draw(self, surf, app):
         w, h = surf.get_size()
-        hud_y = round(opt("HUD_FRAC") * h)
-        draw_vline(surf, w // 2)                                   # center line: top to bottom, splits - and +
+        draw_lower_bg(surf)                                        # light area below the button row: cards go here
+        draw_split_line(surf, w // 2)                              # center line: light above, dark on the lower area
         cy = row_center(h)                                         # counters share the row of the buttons
         size = round(h * 0.055)
         font = app.board.font(h * 0.07, "Black")
@@ -237,7 +258,6 @@ class CardCapture(Module):
                 draw_plus(surf, (sx, cy), size)
                 rect = img.get_rect(midleft=(sx + round(size * 0.95), cy))
             surf.blit(img, rect)
-        pygame.draw.line(surf, (70, 70, 70), (0, hud_y), (w, hud_y), 2)      # cards go below this line
 
     # --- preview on the laptop screen -------------------------------------------------
     def overlay_image(self):

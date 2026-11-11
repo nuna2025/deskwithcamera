@@ -3,14 +3,16 @@
 
 # --- header ---
 HINT_SCALE = 0.85              # size of the centered explanation (1.0 = as big as the right-hand screen name)
-TITLE_SCALE = 1.2              # red title on the left, relative to the header text (1.33 = bigger, earlier size)
+TITLE_SCALE = 1.0              # red title on the left, relative to the header text (1.33 = the first, bigger size)
+RIGHT_SCALE = 0.9              # screen name on the right (1.0 = the earlier size); the end position does not change
 BLINK_PERIOD = 1.0             # seconds per blink cycle (attention messages)
 BLINK_ON = 0.65                # fraction of the cycle the text is visible
 
 # --- layout ---
 SAFE_INSET = 0.03              # header texts keep this distance from the screen edge (fraction of screen width). Raise it if
                                # letters are still cut off at the projector edge, 0 = off (original look)
-HUD_FRAC = 0.19               # top part: button row + counters. Cards go BELOW this line
+HUD_FRAC = 0.205              # top part: button row + counters. Below it: the light yellow area (cards go there)
+LOWER_BG = (0xFF, 0xF5, 0xA0)  # color of that lower area
 
 # --- button shapes (fractions of the content area) ---
 BUTTON_W = 0.11                # rectangular button: width  (fraction of the content width)
@@ -32,6 +34,11 @@ BUTTON_GAP_TOLERANCE = 0.3     # hand may flicker away this long without restart
 BUTTON_DIFF_THR = 40           # gray difference (0..255) that counts as "changed"   <- tune at the table
 BUTTON_PRESENT_FRAC = 0.35     # share of the button zone that must change = hand      <- tune at the table
 BUTTON_ZONE_SHRINK = 0.2       # detection zone = button shrunk by this much on every side
+BUTTON_STUCK_SECONDS = 6.0     # a fired button still sees a "hand" after this long: the empty-button picture is stale -> retake it
+BUTTON_RESETTLE = 0.8          # a button changed its look (SAVE dim <-> bright): wait this long, then learn the new look
+BUTTON_ONLY_BRIGHTER = False   # False = any change counts as a hand (default). True = only a BRIGHTER zone (ignores shadows, but a hand that looks darker is missed)
+BUTTON_MOTION_THR = 5.0        # a zone that changes faster than this (gray levels per frame) is an arm passing by, not a press. Lower = stricter
+BUTTON_GLOBAL_SECONDS = 2.5    # whole picture different (a body in the beam): no presses; after this long it becomes the new normal
 BUTTON_MOUSE = True            # mouse pointer counts as a hand (testing on the laptop)
 
 # No longer used (you may delete them from config.py): SHOW_CAM_STATUS, CAM_STATUS_SCALE.

@@ -58,7 +58,7 @@ CAMERA_ENABLED = True
 CAMERA_INDEX = 0                # DroidCam (MSMF Nummer 0)
 CAMERA_BACKEND = "msmf"         # "auto" | "dshow" | "msmf"
 CAMERA_STALE_SECONDS = 1.0      # no new frame for this long -> shown as OFF
-CAMERA_RESOLUTION = (1280, 720) # resolution requested from the camera (matters for calibration accuracy)
+CAMERA_RESOLUTION = (1920, 1080) # resolution requested from the camera (matters for calibration accuracy)
 CAMERA_PREVIEW = True           # show a camera preview window on the laptop during calibration
 
 

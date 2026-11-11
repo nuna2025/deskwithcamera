@@ -117,4 +117,94 @@ check(fired == [], "camera: whole-picture change (exposure) fires nothing")
 run(p, 1.0, gray=np.clip(base.astype(int) + 60, 0, 255).astype(np.uint8))
 run(p, 3.0, gray=np.clip(base.astype(int) + 60, 0, 255).astype(np.uint8))
 check(fired == [], "camera: ... and the new brightness becomes the new baseline")
+
+# 7. exposure drift: the quiet strip gets 12 % brighter -> zones are compensated, nothing fires
+p = make_panel()
+fired.clear()
+run(p, opt("BUTTON_SETTLE") + 0.1, gray=base)
+run(p, opt("BUTTON_BASELINE_SECONDS") + 0.3, gray=base)
+run(p, opt("BUTTON_RELEASE") + 0.2, gray=base)
+bright = np.clip(base.astype(float) * 1.12, 0, 255).astype(np.uint8)
+run(p, 4.0, gray=bright)
+check(fired == [], "camera: 12 % exposure drift fires nothing")
+
+# 8. stale baseline: SAVE zone looks "changed" forever (no hand) -> fires once, then the panel recovers by itself
+p = make_panel()
+fired.clear()
+run(p, opt("BUTTON_SETTLE") + 0.1, gray=base)
+run(p, opt("BUTTON_BASELINE_SECONDS") + 0.3, gray=base)
+run(p, opt("BUTTON_RELEASE") + 0.2, gray=base)
+stale = hand_on(base, "right")
+run(p, 2.3, gray=stale)
+check(fired == ["save"], "stale baseline: fires once")
+fired.clear()
+run(p, opt("BUTTON_STUCK_SECONDS") + 1.0, gray=stale)
+check(p.message() is None, "stale baseline: 'take your hand away' disappears by itself")
+run(p, 5.0, gray=stale)
+check(fired == [], "stale baseline: and does not fire again")
+
+# 9. a button changes its look when it becomes enabled (SAVE dim -> bright): that is not a hand
+state = {"on": False}
+p = ButtonPanel()
+p.set_buttons([ButtonSpec("save", "SAVE", lambda a: fired.append("save"), "right", enabled=lambda a: state["on"])])
+fired.clear()
+run(p, opt("BUTTON_SETTLE") + 0.1, gray=base)
+run(p, opt("BUTTON_BASELINE_SECONDS") + 0.3, gray=base)
+run(p, 1.0, gray=base)
+state["on"] = True
+bright_save = hand_on(base, "right")                 # the enabled button looks different from the dim one
+run(p, 6.0, gray=bright_save)
+check(fired == [], "enabled button looks different: no false press, no freeze")
+check(not p.busy(), "... and the picture is not frozen")
+
+# 10. a shadow (darker zone) is not a hand
+p = make_panel()
+fired.clear()
+run(p, opt("BUTTON_SETTLE") + 0.1, gray=base)
+run(p, opt("BUTTON_BASELINE_SECONDS") + 0.3, gray=base)
+run(p, opt("BUTTON_RELEASE") + 0.2, gray=base)
+shade = base.copy()
+r = slot_rect("right", *SIZE)
+shade[int(r.top * 0.643) - 6:int(r.bottom * 0.643) + 6, int(r.left * 0.64) - 6:int(r.right * 0.64) + 6] = 30   # dark
+import config
+config.BUTTON_ONLY_BRIGHTER = True
+run(p, 4.0, gray=shade)
+check(fired == [], "camera: with BUTTON_ONLY_BRIGHTER a shadow over a button fires nothing")
+del config.BUTTON_ONLY_BRIGHTER
+p = make_panel()
+run(p, opt("BUTTON_SETTLE") + 0.1, gray=base)
+run(p, opt("BUTTON_BASELINE_SECONDS") + 0.3, gray=base)
+run(p, opt("BUTTON_RELEASE") + 0.2, gray=base)
+run(p, 2.3, gray=shade)
+check(fired == ["save"], "camera: by default a darker hand on SAVE works too")
+
+# 11. an arm that keeps moving over SAVE does not press it; a hand held still does
+p = make_panel()
+fired.clear()
+run(p, opt("BUTTON_SETTLE") + 0.1, gray=base)
+run(p, opt("BUTTON_BASELINE_SECONDS") + 0.3, gray=base)
+run(p, opt("BUTTON_RELEASE") + 0.2, gray=base)
+a_img, b_img = hand_on(base, "right"), base.copy()
+r = slot_rect("right", *SIZE)
+x0, x1, y0, y1 = [int(v) for v in (r.left * 0.64, r.right * 0.64, r.top * 0.643, r.bottom * 0.643)]
+b_img[y0 - 6:y1 + 6, x0 - 6:x1 + 6] = 120
+for _ in range(120):                                   # 4 s: the arm's brightness changes every frame
+    run(p, 1 / 30, gray=a_img if _ % 2 else b_img)
+check(fired == [], "camera: a moving arm over SAVE does not press it")
+run(p, 3.0, gray=base)
+run(p, 2.3, gray=a_img)
+check(fired == ["save"], "camera: ... but a hand held still does")
+
+# 12. a body crosses the beam: the whole picture gets dark for 1.5 s, then everything is as before
+p = make_panel()
+fired.clear()
+run(p, opt("BUTTON_SETTLE") + 0.1, gray=base)
+run(p, opt("BUTTON_BASELINE_SECONDS") + 0.3, gray=base)
+run(p, opt("BUTTON_RELEASE") + 0.2, gray=base)
+dark = (base.astype(float) * 0.4).astype(np.uint8)
+run(p, 1.5, gray=dark)
+run(p, 0.3, gray=base)
+check(fired == [] and not p.busy() and p.message() is None, "body in the beam for 1.5 s: nothing fires, no nagging afterwards")
+run(p, 2.3, gray=hand_on(base, "right"))
+check(fired == ["save"], "... and a real press still works right after")
 print("all button tests passed")

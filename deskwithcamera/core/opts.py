@@ -17,7 +17,9 @@ DEFAULTS = {
     "SAFE_INSET": 0.03,             # header texts keep at least this distance from the screen edge (fraction of the
                                     # screen width). The frame leaves room for the letter that sticks out at the side,
                                     # so a projector that cuts off the edges does not cut letters. 0 = switched off
-    "HUD_FRAC": 0.19,              # top part of the content area: buttons + counters. Cards go BELOW this line
+    "HUD_FRAC": 0.205,             # top part of the content area = button area (dark). Below it: the light yellow area where
+                                   # the cards / photos go (the color change is the dividing line)
+    "LOWER_BG": (0xFF, 0xF5, 0xA0),  # background color of that lower area (light yellow)
 
     # --- button shapes (fractions of the content area) ---------------------------------
     "BUTTON_W": 0.11,               # width of a rectangular button (fraction of the content width)
@@ -40,6 +42,12 @@ DEFAULTS = {
     "BUTTON_PRESENT_FRAC": 0.35,    # this fraction of the button zone must be changed = hand on the button
     "BUTTON_ZONE_SHRINK": 0.2,      # detection zone = button shrunk by this fraction on every side
     "BUTTON_BASELINE_ALPHA": 0.05,  # how fast the empty-button picture follows slow lighting changes
+    "BUTTON_STUCK_SECONDS": 6.0,    # a fired button still sees a "hand" after this long: the empty-button picture is stale -> retake it
+    "BUTTON_RESETTLE": 0.8,         # a button changed its look (SAVE dim <-> bright): wait this long, then learn the new look
+    "BUTTON_ONLY_BRIGHTER": False,  # True = only a BRIGHTER zone counts as a hand. Default False: a hand on the dark button is lit
+                                    # by the dark projected color and often looks DARKER than the table
+    "BUTTON_MOTION_THR": 5.0,       # gray levels per frame: a zone that changes faster than this is an arm passing by, not a press
+    "BUTTON_GLOBAL_SECONDS": 2.5,   # whole picture different (body in the beam): no presses; after this long it becomes the new normal
     "BUTTON_MOUSE": True,           # the mouse pointer also counts as a hand (testing on the laptop)
 }
 

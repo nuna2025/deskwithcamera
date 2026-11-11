@@ -122,6 +122,26 @@ class StabilityTracker:
         self.prev, self.count = None, 0
 
 
+def clean_reference(img):
+    """Empty-table picture for the case that cards ALREADY lie on the table when it is taken.
+
+    The surroundings of every card-sized blob are estimated with a large median filter (it removes objects
+    smaller than half its window and keeps edges) and pasted over the cards. So the cards are found as
+    cards afterwards. An empty table comes back unchanged. Returns (reference, number_of_cards_removed)."""
+    h, w = img.shape[:2]
+    small = cv2.resize(img, (w // 4, h // 4), interpolation=cv2.INTER_AREA)
+    k = int(cfg.REF_CLEAN_KERNEL_FRAC * small.shape[1]) | 1
+    bg = cv2.resize(cv2.medianBlur(small, k), (w, h), interpolation=cv2.INTER_LINEAR)
+    cards, mask = detect_cards(img, bg, return_mask=True)
+    if not cards:
+        return img, 0
+    grow = max(9, int(0.02 * w)) | 1                          # also cover the soft card shadow
+    mask = cv2.dilate(mask, np.ones((grow, grow), np.uint8))
+    out = img.copy()
+    out[mask > 0] = bg[mask > 0]
+    return out, len(cards)
+
+
 # --- cutting out single cards ----------------------------------------------------------
 def crop_raw(board, card):
     """Perspective-corrected crop of the whole card.
