@@ -7,7 +7,7 @@ import config
 
 DEFAULTS = {
     # --- header -----------------------------------------------------------------
-    "HINT_SCALE": 0.85,             # size of the centered hint relative to the normal header text (1.0 = same size)
+    "HINT_SCALE": 0.80,             # size of the centered hint relative to the normal header text (1.0 = same size)
     "TITLE_SCALE": 1.0,             # size of the red title on the left relative to the header text (1.33 = the first size)
     "RIGHT_SCALE": 0.9,             # size of the screen name on the right (1.0 = the earlier size); its end position stays the same
     "BLINK_PERIOD": 1.0,            # seconds for one blink cycle (attention messages)

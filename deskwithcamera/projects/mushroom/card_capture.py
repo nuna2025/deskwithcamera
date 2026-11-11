@@ -1,16 +1,18 @@
-"""Card capture module: find the cards on the table, count them per side, save them as a dataset session.
+"""Classification module: teach the computer with cards, then test it with a new card.
 
-Workflow
-    1. Calibrate first (key 2). The camera must see the whole frame.
-    2. Clear the table: the empty-table reference picture is taken by itself a few seconds after the
-       module starts. Key: B = take a new one now (e.g. after the light or the camera changed).
-       RESET keeps it and just looks at the table again (cards already lying there are found again).
-    3. Put the cards BELOW the gray line, completely inside their half (+ right, - left), not touching
-    4. Wait until the header says "Ready"  ->  hold a hand on SAVE  (or press S)
+Step 1  "teach me":  put NEGATIVE cards on the left, POSITIVE cards on the right (completely inside their half, not
+                     touching). Wait until the header says "Ready", then hold a hand on LEARN.
+Clear the table:     the cards are saved (data/sessions/...); "Take the teaching cards away". The model already starts
+                     learning in the background.
+Learning:            when the table is empty: "Learning ..." with a moving bar until the model is ready (it learns from the
+                     cards and from the saved sessions, see LEARN_USE_SAVED in settings.py).
+Step 2  "test":      put a card to test on the table: a colored ring and a label say "negative" (red) or "positive" (blue)
+                     with the confidence. AGAIN = teach from the start.
 
-Buttons (hold a hand on them): HOME (if there is a Home screen), RESET, SAVE
+Before: calibrate (key 2). The empty-table picture is taken by itself a few seconds after the module starts.
+Buttons (hold a hand on them): HOME, RESET (look at the table again), LEARN / AGAIN
 Keys work in the projection window AND in the camera preview window on the laptop:
-    B = empty-table reference     S = save session     D = show/hide the detector's mask (debugging)
+    B = new empty-table picture   S = only save the cards   L = learn   A = again   D = show/hide the detector's mask
     (ESC / C / Tab are handled by the app)
 """
 import math
@@ -23,10 +25,12 @@ import config
 from core.buttons import ButtonSpec, row_center
 from core.module import Module
 from core.opts import opt
-from core.shapes import draw_lower_bg, draw_minus, draw_plus, draw_split_line
 from projects.mushroom import settings as cfg
 from projects.mushroom.cards import StabilityTracker, clean_reference, detect_cards, rectify
-from projects.mushroom.dataset import save_session
+from projects.mushroom import screens
+from projects.mushroom.cards import crop_inner, crop_raw, letterbox
+from projects.mushroom.dataset import load_cards, save_session
+from projects.mushroom.learner import Learner
 from projects.mushroom.plus_minus_split import LABELS
 
 try:
@@ -34,7 +38,7 @@ try:
 except ImportError:
     cv2 = None
 
-PREVIEW_WINDOW = "Card capture   (B = empty table, S = save, D = mask)"
+PREVIEW_WINDOW = "Card capture   (B = empty table, S = save, L = learn, A = again, D = mask)"
 COLORS = {"+": (60, 120, 255), "-": (255, 170, 60)}          # BGR: + orange-red, - blue
 BAD = (0, 0, 255)
 
@@ -48,9 +52,10 @@ class CardCapture(Module):
     title = "Card capture"
     area = "Classification"
     menu_label = "Classification"
-    menu_caption = "Mushroom cards"
+    menu_caption = "Teach and test cards"
 
     def __init__(self):
+        self.learner = Learner()
         self.reset()
         self._preview_on = config.CAMERA_PREVIEW
         self.data_dir = cfg.DATA_DIR
@@ -71,6 +76,11 @@ class CardCapture(Module):
         self.last_saved = None
         self.mask = None
         self.show_mask = False
+        self.phase = "learn"             # learn (step 1) | clear (take the cards away) | learning | test (step 2)
+        self._phase_t = 0.0              # seconds in the current phase
+        self.n_train = (0, 0)            # (negative, positive) cards the model learns from
+        self._clear_t = 0.0              # seconds the table has been empty in the 'clear' phase
+        self._results = []               # [(center, side, confidence)] classified cards (step 2)
 
     # --- lifecycle --------------------------------------------------------
     def on_enter(self, app):
@@ -92,6 +102,10 @@ class CardCapture(Module):
                 self.key("s", app)
             elif event.key == pygame.K_d:
                 self.key("d", app)
+            elif event.key == pygame.K_l:
+                self.key("l", app)
+            elif event.key == pygame.K_a:
+                self.key("a", app)
 
     def key(self, ch, app):
         if ch == "b":
@@ -103,13 +117,25 @@ class CardCapture(Module):
             self.save(app)
         elif ch == "d":
             self.show_mask = not self.show_mask
+        elif ch == "l" and self.phase == "learn":
+            self.start_learning(app)
+        elif ch == "a" and self.phase == "test":
+            self.again(app)
 
     # --- buttons -----------------------------------------------------------
     def buttons(self, app):
+        if self.phase in ("clear", "learning"):
+            return []
+        if self.phase == "test":
+            return [ButtonSpec("again", "AGAIN", lambda app: self.again(app), "right")]
         return [
-            ButtonSpec("save", "SAVE", lambda app: self.save(app), "right", enabled=lambda app: self.can_save()),
+            ButtonSpec("learn", "LEARN", lambda app: self.start_learning(app), "right", enabled=lambda app: self.can_save()),
             ButtonSpec("reset", "RESET", lambda app: self.reset_reference(), "right2", hold=3.0),   # destroys the cards: longer hold
         ]
+
+    def _set_phase(self, phase, app):
+        self.phase, self._phase_t = phase, 0.0
+        app.refresh_buttons()
 
     def reset_reference(self):
         """RESET: forget the cards found so far and look at the table again.
@@ -128,6 +154,9 @@ class CardCapture(Module):
 
     # --- per frame -----------------------------------------------------------
     def update(self, dt, app):
+        self._phase_t += dt
+        if self.phase in ("clear", "learning"):
+            self._poll_learning(app)
         if cv2 is None or not app.calib.ok:
             return
         frame = app.camera.latest()
@@ -154,7 +183,7 @@ class CardCapture(Module):
                     self.say(f"{n_there} card(s) were already on the table", 3.0)
                 self._ref_H = app.calib.H.copy()
                 self._ref_frames = []
-        elif self.reference is not None:
+        elif self.reference is not None and self.phase != "learning":
             cards, self.mask = detect_cards(self.board, self.reference, return_mask=True)
             odd = any({"too_big", "irregular"} & set(c.flags) for c in cards)     # not a card: hand, arm, shadow
             self._hand_t = self._hand_t + dt if odd else 0.0
@@ -162,9 +191,77 @@ class CardCapture(Module):
             if not self._hand:                            # (while a hand is in view the last result stays)
                 self.cards = cards
                 self.tracker.update(self.cards)
+                if self.phase == "test":
+                    self._classify_cards()
+                elif self.phase == "clear":
+                    self._clear_t = self._clear_t + dt if not self.cards else 0.0
+                    if self._clear_t >= 1.0:                      # the table has been empty for a second
+                        self._set_phase("learning", app)
 
         if self._preview_on:
             self._show_preview(app)
+
+    # --- learn and test -------------------------------------------------------
+    def start_learning(self, app):
+        """LEARN: save the cards on the table, then let the model learn from them (and the saved sessions)."""
+        if self.phase != "learn":
+            return
+        if not self.can_save():
+            self.say("Cannot learn yet: " + self.status_text(app)[0])
+            return
+        folder, rows = save_session(self.data_dir, self.frame, self.board, self.reference,
+                                    self.overlay_image(), self.cards, app.calib, LABELS)
+        self.last_saved = folder
+        images, labels, _ = load_cards(self.data_dir, None if cfg.LEARN_USE_SAVED else [folder.name])
+        n_neg, n_pos = labels.count("safe"), labels.count("poisonous")
+        if n_neg < 1 or n_pos < 1:
+            self.say("Learning needs cards on BOTH sides: negative (left) and positive (right)", 6.0)
+            return
+        self.n_train = (n_neg, n_pos)
+        print(f"[learn] {n_neg} negative + {n_pos} positive cards, model {cfg.MODEL_ID}")
+        self.learner.start(images, labels, cfg.MODEL_ID)          # learns in the background while the cards are taken away
+        self._clear_t = 0.0
+        self._set_phase("clear", app)
+
+    def _poll_learning(self, app):
+        st = self.learner.state
+        if st == "ready" and self.phase == "learning" and self._phase_t >= 1.5:   # (at least 1.5 s on this screen)
+            if self.learner.note:
+                self.say(self.learner.note, 6.0)
+            self._results = []
+            self.tracker.reset()
+            self._set_phase("test", app)
+        elif st == "error":
+            self.say("Learning failed: " + self.learner.error, 8.0)
+            self._set_phase("learn", app)
+
+    def again(self, app):
+        """AGAIN: back to step 1 (teach from the start)."""
+        self.cards, self._results = [], []
+        self.tracker.reset()
+        self._set_phase("learn", app)
+
+    def _board_wh(self):
+        if self.board is not None:
+            return self.board.shape[1], self.board.shape[0]
+        return cfg.BOARD_SIZE
+
+    def _classify_cards(self):
+        """Step 2: classify every card once it holds still (and again if it moved)."""
+        bw, _ = self._board_wh()
+        tol_move = cfg.PREDICT_MOVE_TOL_FRAC * bw
+        results = []
+        for c in self.cards:
+            if c.flags:
+                continue
+            hit = [r for r in self._results if math.hypot(r[1][0] - c.center[0], r[1][1] - c.center[1]) <= tol_move]
+            if hit:
+                results.append((c.box, c.center, hit[0][2], hit[0][3]))
+            elif self.tracker.stable and self.learner.state == "ready":
+                crop = letterbox(crop_inner(crop_raw(self.board, c)))
+                side, conf = self.learner.classify(crop)
+                results.append((c.box, c.center, side, conf))
+        self._results = results
 
     # --- saving --------------------------------------------------------------
     def counts(self):
@@ -203,6 +300,10 @@ class CardCapture(Module):
             return "Calibrate first (key 2)", False
         if not app.camera.is_on:
             return "Cam OFF", False
+        if self.phase == "learning":
+            return "Learning ...", True
+        if self.phase == "clear":
+            return "Take the teaching cards away - learning starts when the table is empty", True
         if self._ref_countdown > 0:
             return f"Clear the table: reference in {math.ceil(self._ref_countdown)}", True
         if self._ref_pending:
@@ -212,6 +313,8 @@ class CardCapture(Module):
         if self._hand:
             return "Hand in view ...", True
         probs = self.problems()
+        if self.phase == "test":
+            probs = [p for p in probs if p != "crosses_center"]       # no center line in step 2
         if "crosses_center" in probs:
             return "Card on the center line", False
         if "touches_hud" in probs:
@@ -220,11 +323,17 @@ class CardCapture(Module):
             return "Cards touching? move them apart", False
         if "irregular" in probs:
             return "Unclear shape: move cards apart", False
+        if self.phase == "test":
+            if not self.cards:
+                return "Step 2 of 2: put a card to test - positive or negative?", True
+            if not self.tracker.stable:
+                return "Hold still ...", True
+            return "Put another card to test, or hold a hand on AGAIN", True
         if not self.cards:
-            return "Place the cards", True
+            return "Step 1 of 2: teach me - negative cards left, positive cards right", True
         if not self.tracker.stable:
             return "Hold still ...", True
-        return "Ready: hold your hand on SAVE", True
+        return "Ready: hold your hand on LEARN", True
 
     def hint(self, app):
         """(text, mode) for the second header line."""
@@ -233,31 +342,19 @@ class CardCapture(Module):
         text, ok = self.status_text(app)
         if not ok:
             return text, "warn"
-        if text.startswith(("Ready", "Clear the table", "Place the cards")):
+        if text.startswith(("Ready", "Clear the table", "Step", "Take the teaching")):
             return text, "blink"                # needs the user to act
         return text, "info"
 
     # --- drawing -------------------------------------------------------------------
     def draw(self, surf, app):
-        w, h = surf.get_size()
-        draw_lower_bg(surf)                                        # light area below the button row: cards go here
-        draw_split_line(surf, w // 2)                              # center line: light above, dark on the lower area
-        cy = row_center(h)                                         # counters share the row of the buttons
-        size = round(h * 0.055)
-        font = app.board.font(h * 0.07, "Black")
-        n = self.counts()
-        g = round(0.08 * w - size / 2)                             # distance center line -> symbol (same on both sides)
-        for side in ("-", "+"):
-            img = font.render(str(n[side]), True, config.CAM_ON_COLOR if n[side] else config.TEXT_COLOR)
-            if side == "-":                                        # number next to the center line, symbol to its left
-                rect = img.get_rect(midright=(w // 2 - g, cy))
-                sx = rect.left - round(size * 0.45) - size // 2
-                draw_minus(surf, (sx, cy), size)
-            else:                                                  # symbol next to the center line, number to its right
-                sx = w // 2 + g + size // 2
-                draw_plus(surf, (sx, cy), size)
-                rect = img.get_rect(midleft=(sx + round(size * 0.95), cy))
-            surf.blit(img, rect)
+        if self.phase == "learning":
+            screens.draw_learning(surf, app, self._phase_t, *self.n_train)
+        elif self.phase == "test":
+            items = [(box, center, side, conf) for box, center, side, conf in self._results]
+            screens.draw_result(surf, app, items, self._board_wh())
+        else:                                              # step 1 - and also while the teaching cards are taken away
+            screens.draw_teach(surf, app, self.counts())
 
     # --- preview on the laptop screen -------------------------------------------------
     def overlay_image(self):
@@ -294,6 +391,10 @@ class CardCapture(Module):
                 self.key("s", app)
             elif k in (ord("d"), ord("D")):
                 self.key("d", app)
+            elif k in (ord("l"), ord("L")):
+                self.key("l", app)
+            elif k in (ord("a"), ord("A")):
+                self.key("a", app)
         except cv2.error:
             self._preview_on = False
             print("[capture] preview window not available (install opencv-contrib-python)")

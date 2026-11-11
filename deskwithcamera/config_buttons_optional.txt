@@ -2,7 +2,7 @@
 # Add a line to your config.py only if you want to change it.
 
 # --- header ---
-HINT_SCALE = 0.85              # size of the centered explanation (1.0 = as big as the right-hand screen name)
+HINT_SCALE = 0.80              # size of the centered explanation (1.0 = as big as the right-hand screen name)
 TITLE_SCALE = 1.0              # red title on the left, relative to the header text (1.33 = the first, bigger size)
 RIGHT_SCALE = 0.9              # screen name on the right (1.0 = the earlier size); the end position does not change
 BLINK_PERIOD = 1.0             # seconds per blink cycle (attention messages)

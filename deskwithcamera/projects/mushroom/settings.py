@@ -28,3 +28,8 @@ CARD_SIZE = 256                      # saved card images are CARD_SIZE x CARD_SI
 
 # --- Classification model -------------------------------------------------------
 MODEL_ID = 2                         # 1 = HSV + Linear SVM, 2 = MobileNetV2 + LogReg, 3 = HOG + Linear SVM
+
+# --- Learn & test flow ----------------------------------------------------------
+LEARN_USE_SAVED = True               # True = learn from the cards on the table AND all saved sessions; False = only the cards on the table
+OLD_CARD_TOL_FRAC = 0.04             # a card within this fraction of the width of a teaching card is still "a teaching card" in the test step
+PREDICT_MOVE_TOL_FRAC = 0.025        # a card that moved less than this keeps its result (no new prediction)

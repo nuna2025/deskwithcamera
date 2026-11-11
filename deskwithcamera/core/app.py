@@ -83,8 +83,12 @@ class App:
 
     def _enter(self):
         """Start the current module and set up its buttons (HOME is added automatically)."""
+        self.module.on_enter(self)
+        self.refresh_buttons()
+
+    def refresh_buttons(self):
+        """(Re)build the buttons of the current module - a module calls this when its buttons change (e.g. a new step)."""
         mod = self.module
-        mod.on_enter(self)
         specs = []
         if mod.show_buttons:
             if self.home_index is not None and self.index != self.home_index and mod.show_home:
