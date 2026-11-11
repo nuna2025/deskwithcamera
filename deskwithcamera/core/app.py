@@ -16,6 +16,7 @@ from core.board import Board, compute_layout
 from core.buttons import ButtonPanel, ButtonSpec
 from core.calibration import Calibration
 from core.camera import Camera
+from core.sound import play_startup
 
 try:
     from core import vision
@@ -165,6 +166,7 @@ class App:
         if config.CAMERA_ENABLED:
             self.camera.start()
         self._enter()
+        play_startup()                       # audible "program started" signal
         clock = pygame.time.Clock()
         self.running = True
         while self.running:
