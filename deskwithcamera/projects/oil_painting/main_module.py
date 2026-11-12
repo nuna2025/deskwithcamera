@@ -13,6 +13,7 @@ NEW (in the middle, only while a painting is ready or shown). STROKE / COLOR pai
 Keys (projection window AND camera preview window): B = new empty-table picture (same as RESET), N = new photo, T = stroke, C = color
 """
 import math
+from types import SimpleNamespace
 
 import numpy as np
 import pygame
@@ -32,7 +33,9 @@ except ImportError:
 
 PREVIEW_WINDOW = "Oil painting   (B = empty table, N = new photo, T = stroke, C = color)"
 CROP_INNER = 0.95            # cut off the table / paper edge around the photo
-MAX_SIDE = 480               # photos are scaled down to this before painting (speed)
+PAINT_SIDE = 1440            # long side of the painting that is computed and SAVED (about 0.7 s)
+SHOW_DIM = 0.6              # brightness of the painting ON THE TABLE only (1.0 = unchanged); the saved file is not dimmed
+SHOW_SIDE = 960              # the copy shown on the table is scaled to this (the projector has only 1080 lines)
 REF_DELAY = 6.0              # seconds after the module starts until the empty-table picture is taken
 RESET_DELAY = 4.0            # ... after RESET / key B
 REF_WINDOW = 2.5             # the empty-table picture is the MEDIAN of the last 2.5 s: an arm passing by drops out
@@ -289,7 +292,7 @@ class OilPainting(Module):
     def _paint_photo(self, app):
         c = self.photo
         self._photo_box = c.box.copy()
-        raw = crop_raw(self.board, c)
+        raw = self._crop_hires(app, c)
         self.source = crop_inner(raw, CROP_INNER)
         self._repaint()
         try:                                                # saving must never stop the program
@@ -301,12 +304,32 @@ class OilPainting(Module):
             self.folder = None
             print(f"[oil painting] could not save: {e}")
 
+    def _crop_hires(self, app, card):
+        """Cut the photo out of the ORIGINAL camera frame (not the 1280x720 board): the board is re-built at the
+        camera's full resolution and the photo's corners are scaled to it, so the photo keeps all its detail."""
+        try:
+            fh, fw = self.frame.shape[:2]
+            bh, bw = self.board.shape[:2]
+            if fw > bw:
+                hi = rectify(self.frame, app.calib.H, size=(fw, fh))
+                box = card.box.astype(np.float32) * np.array([fw / bw, fh / bh], np.float32)
+                return crop_raw(hi, SimpleNamespace(box=box))
+        except Exception as e:
+            print(f"[oil painting] full-resolution crop failed, using the board: {e}")
+        return crop_raw(self.board, card)
+
     def _repaint(self):
         """Paint the stored photo with the current stroke / color."""
         if self.source is None or cv2 is None:
             return
-        self.result = styles.paint(self.source, self.stroke, self.color, MAX_SIDE)
-        rgb = cv2.cvtColor(self.result, cv2.COLOR_BGR2RGB)
+        self.result = styles.paint(self.source, self.stroke, self.color, PAINT_SIDE, upscale=True)   # large: saved as is
+        shown = self.result
+        if max(shown.shape[:2]) > SHOW_SIDE:                # smaller copy for the table
+            k = SHOW_SIDE / max(shown.shape[:2])
+            shown = cv2.resize(shown, (int(shown.shape[1] * k), int(shown.shape[0] * k)), interpolation=cv2.INTER_AREA)
+        lut = np.clip(np.arange(256) * SHOW_DIM, 0, 255).astype(np.uint8)
+        shown = cv2.LUT(shown, lut)                         # slightly darker for the projector; background stays as it is
+        rgb = cv2.cvtColor(shown, cv2.COLOR_BGR2RGB)
         self.surface = pygame.image.frombuffer(rgb.tobytes(), (rgb.shape[1], rgb.shape[0]), "RGB")
         if self.folder is not None:                         # same capture, new look: keep the file up to date
             try:

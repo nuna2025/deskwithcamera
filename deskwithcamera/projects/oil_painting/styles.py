@@ -221,12 +221,14 @@ def grade(img, name):
     return np.clip(f, 0, 255).astype(np.uint8)
 
 
-def paint(img, stroke=1, color=0, max_side=480):
-    """Oil painting. stroke = index in STROKE_LEVELS, color = index in COLOR_GRADES."""
+def paint(img, stroke=1, color=0, max_side=480, upscale=False):
+    """Oil painting. stroke = index in STROKE_LEVELS, color = index in COLOR_GRADES.
+    The picture is scaled so that its long side is max_side (smaller pictures only if upscale=True:
+    brush strokes hide the missing detail, the result is just larger and smoother)."""
     h, w = img.shape[:2]
-    if max(h, w) > max_side:
+    if max(h, w) > max_side or (upscale and max(h, w) < max_side):
         k = max_side / max(h, w)
-        img = cv2.resize(img, (int(w * k), int(h * k)), interpolation=cv2.INTER_AREA)
+        img = cv2.resize(img, (int(w * k), int(h * k)), interpolation=cv2.INTER_AREA if k < 1 else cv2.INTER_CUBIC)
     name = COLOR_GRADES[color]
     if name == "Pure":                                    # veil off first, paint, then strong but clean colors
         return vibrance(oil_rough(autolevels(img), STROKE_LEVELS[stroke][1]), PURE_VIBRANCE, PURE_CONTRAST, PURE_GAMMA)
