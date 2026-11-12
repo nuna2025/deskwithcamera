@@ -149,8 +149,22 @@ class ButtonPanel:
 
     def _all_rects(self, size):
         rects = dict(self.rects)
-        rects["_witness"] = witness_rect(*size)
+        rects["_witness"] = self._free_witness(size)
         return rects
+
+    def _free_witness(self, size):
+        """The quiet strip sits in the middle of the row; if a button is there (e.g. NEW), it moves to a free gap."""
+        w, h = size
+        base = witness_rect(w, h)
+        taken = [r.inflate(round(0.02 * w), 0) for r in self.rects.values()]
+        if not any(base.colliderect(t) for t in taken):
+            return base
+        for cx in (0.30, 0.26, 0.34, 0.22, 0.70, 0.74):
+            r = base.copy()
+            r.centerx = round(cx * w)
+            if not any(r.colliderect(t) for t in taken):
+                return r
+        return base
 
     @staticmethod
     def _cells(z):
