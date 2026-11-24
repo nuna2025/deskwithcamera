@@ -1,3 +1,5 @@
 pygame
 numpy
 opencv-contrib-python
+scikit-learn
+mediapipe
