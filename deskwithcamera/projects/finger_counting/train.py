@@ -3,6 +3,12 @@
     python -m projects.finger_counting.train                 try 3 kinds of model, test them honestly, save the best one
     python -m projects.finger_counting.train --model forest  use only this kind (forest | extra | mlp)
     python -m projects.finger_counting.train --no-save       only test, do not touch the saved model
+    python -m projects.finger_counting.train --note "dark theme, fixed exposure"   comment saved in the report and history
+    python -m projects.finger_counting.train --keep-images   also copy the shown pictures next to the report (complete, portable)
+    python -m projects.finger_counting.train --only 2026-11-25 --note "dark only"   use only sessions whose name contains this (comma = several); test only
+    python -m projects.finger_counting.train --skip 2026-11-25                      use all sessions EXCEPT these; test only
+    python -m projects.finger_counting.train --only 2026-11-25 --save               same, and ALSO save this model for the app
+    python -m projects.finger_counting.train --drop 00010,10010   leave these shapes out (e.g. shapes your hand cannot show cleanly)
 
 How it is tested (the honest way): the model is trained on one filming session and tested on ANOTHER one it has never seen
 (two sessions: A -> B and B -> A; with only one session: take 1 -> take 2). A model never gets tested on frames of a video it learned from.
@@ -14,6 +20,7 @@ At the end the best kind is trained on ALL data and saved as data/model.joblib. 
 """
 import sys
 import time
+from pathlib import Path
 from collections import Counter
 from datetime import datetime
 
@@ -27,7 +34,7 @@ FINAL = DATA_DIR / "dataset"
 KINDS = ("forest", "extra", "mlp")
 
 
-def load():
+def load(drop=(), only=(), skip=()):
     f = FINAL / "dataset.npz"
     if not f.exists():
         sys.exit("No final data set yet. Run:  python -m projects.finger_counting.dataset build / confirm")
@@ -40,6 +47,19 @@ def load():
         gone = {ln.strip() for ln in ex.read_text(encoding="utf-8").splitlines() if ln.strip()}
         keep = np.array([f"{s}/{i}" not in gone for s, i in zip(d["session"], d["id"])])
         print(f"[train] {int((~keep).sum())} frames left out (exclude.txt)")
+        d = {k: v[keep] for k, v in d.items()}
+    if only or skip:                                                      # compare filming conditions: only / without some sessions
+        def pick(name):
+            name = str(name)
+            return (not only or any(o in name for o in only)) and not any(k in name for k in skip)
+        keep = np.array([pick(x) for x in d["session"]])
+        print(f"[train] sessions used: {', '.join(sorted(set(str(x) for x in d['session'][keep])))}   ({int((~keep).sum())} frames left out)")
+        if not keep.any():
+            sys.exit("No session matches --only / --skip.  Run:  python -m projects.finger_counting.dataset status")
+        d = {k: v[keep] for k, v in d.items()}
+    if drop:                                                              # shapes you cannot show reliably: leave them out completely
+        keep = np.array([str(b) not in drop for b in d["bits"]])
+        print(f"[train] shapes left out ({', '.join(sorted(drop))}): {int((~keep).sum())} frames")
         d = {k: v[keep] for k, v in d.items()}
     d["X"] = np.array([H.features(p) for p in d["P"]], dtype=np.float32)      # features are computed here, so they can be improved any time
     return d
@@ -103,7 +123,7 @@ def scores(t, p):
 EVERYDAY = {"00000", "01000", "10000", "01100", "11000", "01110", "11100", "01111", "11111"}      # how people usually count 0 .. 5
 
 
-def disagreements(d, t, p, fl):
+def disagreements(d, t, p, fl, stamp, keep=False):
     """A gallery of the frames the model got wrong on videos it did not learn from: look at them, remove the wrong labels."""
     ids = []
     for name, tr, te in fl:
@@ -135,18 +155,38 @@ figcaption{font-size:12px;padding:2px 3px}figure.ex{border-color:#d00}figure.ex:
 <label>size <input type="range" min="150" max="900" value="340" oninput="document.documentElement.style.setProperty('--w',this.value+'px')"></label></div>
 <div id="help">Frames the model got wrong on a video it did not learn from. Look at the real hand: if the LABEL (title) is wrong, click the frame (red).
 Then Save exclude.txt and put the file into data/dataset/. The size slider makes the pictures bigger or smaller (no browser zoom needed).</div>"""]
+    shown = []
     for a, items in sorted(groups.items(), key=lambda kv: -len(kv[1])):
         pick = [items[i] for i in rng.permutation(len(items))[:40]]
-        h.append(f'<h2>asked for {a} = {name_of(a)} &nbsp;<small>({len(items)} wrong frames, {len(pick)} shown)</small></h2><div class="g">')
+        h.append(f'<h2>asked for {a} = {name_of(a)} &nbsp;<small>({len(items)} wrong frames, {len(pick)} shown)</small> '
+                 f'<button onclick="allOf(this.parentNode.nextElementSibling)">mark / unmark all shown</button></h2><div class="g">')
         for sess, fid, b in pick:
+            shown.append((sess, paths[sess][fid]))
             h.append(f'<figure data-id="{sess}/{fid}" onclick="this.classList.toggle(\'ex\');cnt()"><img loading="lazy" '
-                     f'src="../review/{sess}/{paths[sess][fid]}"><figcaption>model said {b} ({name_of(b)})</figcaption></figure>')
+                     f'src="@@REL@@{sess}/{paths[sess][fid]}"><figcaption>model said {b} ({name_of(b)})</figcaption></figure>')
         h.append("</div>")
-    h.append("""<script>function cnt(){document.getElementById('n').textContent=document.querySelectorAll('figure.ex').length}
+    h.append("""<script>function allOf(g){const fs=[...g.querySelectorAll('figure')];const on=fs.some(f=>!f.classList.contains('ex'));fs.forEach(f=>f.classList.toggle('ex',on));cnt()}
+function cnt(){document.getElementById('n').textContent=document.querySelectorAll('figure.ex').length}
 function save(){const ids=[...document.querySelectorAll('figure.ex')].map(f=>f.dataset.id).join('\\n');const a=document.createElement('a');
 a.href=URL.createObjectURL(new Blob([ids+'\\n'],{type:'text/plain'}));a.download='exclude.txt';a.click()}</script>""")
-    (FINAL / "disagreements.html").write_text("\n".join(h), encoding="utf-8")
-    return FINAL / "disagreements.html"
+    html = "\n".join(h)
+    REPORTS = FINAL / "reports"                                         # every run is kept here with its date and time
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    (FINAL / "disagreements.html").write_text(html.replace("@@REL@@", "../review/"), encoding="utf-8")
+    arch = REPORTS / f"disagreements_{stamp}.html"
+    if keep:                                                            # copy the shown pictures next to the report: it stays complete for ever
+        import shutil
+        imgdir = REPORTS / f"disagreements_{stamp}_images"
+        imgdir.mkdir(exist_ok=True)
+        for sess, pth in shown:
+            src = DATA_DIR / "review" / sess / pth
+            if src.exists():
+                new = f"{sess}_{Path(pth).name}"
+                shutil.copy2(src, imgdir / new)
+                html = html.replace(f"@@REL@@{sess}/{pth}", f"{imgdir.name}/{new}")
+        print(f"Pictures copied to: {imgdir}")
+    arch.write_text(html.replace("@@REL@@", "../../review/"), encoding="utf-8")
+    return arch
 
 
 def main(argv):
@@ -159,7 +199,16 @@ def main(argv):
     if "--model" in argv:
         kinds = (argv[argv.index("--model") + 1],)
     save = "--no-save" not in argv
-    d = load()
+    drop = set()
+    if "--drop" in argv:                                                  # e.g.  --drop 00010,10010
+        drop = {b for b in argv[argv.index("--drop") + 1].split(",") if b}
+    only = [x for x in argv[argv.index("--only") + 1].split(",") if x] if "--only" in argv else []
+    skip = [x for x in argv[argv.index("--skip") + 1].split(",") if x] if "--skip" in argv else []
+    if only or skip:
+        save = "--save" in argv                                           # a model from a part of the data replaces the real one only on purpose
+        print("[train] --only/--skip: the model is SAVED for the app (--save)" if save else
+              "[train] --only/--skip: test only, the saved model stays untouched (add --save to keep this model for the app)")
+    d = load(drop, only, skip)
     Y = to_y(d["bits"])
     fl = folds(d)
     n_sess = len(set(str(s) for s in d["session"]))
@@ -184,6 +233,15 @@ def main(argv):
     t, p, r = results[best]
     tb, pb = to_bits(t), to_bits(p)
 
+    out.append("\nScore per test video (each one tested by a model that never saw it):")
+    pos = 0
+    for name, tr_, te_ in fl:
+        if not tr_.any() or not te_.any():
+            continue
+        n_ = int(te_.sum())
+        tt, pp = t[pos:pos + n_], p[pos:pos + n_]
+        pos += n_
+        out.append(f"  {name:18s} exact pattern {float((tt == pp).all(axis=1).mean()):6.1%}   number of fingers {float((tt.sum(axis=1) == pp.sum(axis=1)).mean()):6.1%}")
     per = {}
     for a, b in zip(tb, pb):
         per.setdefault(a, [0, 0])
@@ -213,7 +271,20 @@ def main(argv):
     print("\n" + text)
     FINAL.mkdir(parents=True, exist_ok=True)
     (FINAL / "train_report.txt").write_text(text, encoding="utf-8")
-    gal = disagreements(d, t, p, fl)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    (FINAL / "reports").mkdir(parents=True, exist_ok=True)
+    note = argv[argv.index("--note") + 1] if "--note" in argv else ""
+    (FINAL / "reports" / f"train_report_{stamp}.txt").write_text((f"Note: {note}\n\n" if note else "") + text, encoding="utf-8")
+    ex_b, co_b, _ = scores(t, p)
+    ev_ = np.array([a in EVERYDAY for a in tb])
+    ev_acc = float((p[ev_].sum(axis=1) == t[ev_].sum(axis=1)).mean()) if ev_.any() else float("nan")
+    hist = FINAL / "reports" / "history.csv"
+    new = not hist.exists()
+    with open(hist, "a", encoding="utf-8", newline="") as fh:
+        if new:
+            fh.write("time,frames,sessions,dropped,best_model,exact,number,everyday_number,rule_exact,rule_number,note\n")
+        fh.write(f"{stamp},{len(Y)},{n_sess},{'+'.join(sorted(drop))},{best},{ex_b:.3f},{co_b:.3f},{ev_acc:.3f},{rex:.3f},{rco:.3f},\"{note}\"\n")
+    gal = disagreements(d, t, p, fl, stamp, "--keep-images" in argv)
     print(f"\nWrong frames to look at: {gal}")
 
     if not save:
